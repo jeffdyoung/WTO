@@ -1,0 +1,14 @@
+domain: workload-tuning.io
+layout:
+- go.kubebuilder.io/v4
+projectName: wto
+repo: github.com/jeffdyoung/wto
+version: "3"
+resources:
+- api:
+    crdVersion: v1
+    namespaced: true
+  group: workload-tuning.io
+  kind: WorkloadProfile
+  path: github.com/jeffdyoung/wto/api/v1alpha1
+  version: v1alpha1

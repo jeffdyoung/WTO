@@ -1,0 +1,16 @@
+apiVersion: workload-tuning.io/v1alpha1
+kind: WorkloadProfile
+metadata:
+  name: cpu-small
+  annotations:
+    workload-tuning.io/display-name: "Small CPU"
+    workload-tuning.io/description: "2 CPUs and 4Gi memory, no GPU"
+spec:
+  defaults:
+    resources:
+      requests:
+        cpu: "2"
+        memory: "4Gi"
+      limits:
+        cpu: "2"
+        memory: "4Gi"
