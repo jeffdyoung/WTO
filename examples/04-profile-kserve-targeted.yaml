@@ -1,0 +1,43 @@
+# Per-container targeted profile for KServe InferenceService.
+# Targets "kserve-container" by name — leaves sidecars (kube-rbac-proxy, agent)
+# untouched with their original resources.
+#
+# Why per-container targeting matters:
+#   KServe injects 2 sidecar containers (kube-rbac-proxy, agent) alongside
+#   the model container. A profile using "defaults" would override ALL container
+#   resources — including the sidecars — which can cause OOM kills or waste quota.
+#   Targeting by name ensures only the model container gets GPU resources.
+apiVersion: workload-tuning.io/v1alpha1
+kind: WorkloadProfile
+metadata:
+  name: gpu-t4-kserve
+  namespace: wto-examples
+  annotations:
+    workload-tuning.io/display-name: "Tesla T4 (KServe)"
+    workload-tuning.io/description: "1x Tesla T4 GPU targeting kserve-container only"
+    workload-tuning.io/dashboard-feature-visibility: '["model-serving"]'
+spec:
+  containers:
+    - name: kserve-container
+      resources:
+        requests:
+          cpu: "2"
+          memory: 4Gi
+        limits:
+          cpu: "4"
+          memory: 16Gi
+  deviceClaims:
+    - name: gpu
+      request:
+        name: gpu
+        exactly:
+          deviceClassName: gpu.nvidia.com
+          count: 1
+          selectors:
+            - cel:
+                expression: 'device.attributes["gpu.nvidia.com"].productName == "Tesla T4"'
+  placement:
+    type: Node
+    node:
+      nodeSelector:
+        nvidia.com/gpu.present: "true"

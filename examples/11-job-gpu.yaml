@@ -1,0 +1,21 @@
+# Batch Job with GPU profile.
+# The profile annotation is on the pod template — the Job controller
+# creates pods that the WTO webhook intercepts.
+# Each Job pod gets DRA GPU access and runs nvidia-smi.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: gpu-job
+  namespace: wto-examples
+spec:
+  template:
+    metadata:
+      annotations:
+        workload-tuning.io/profile-name: gpu-t4-node
+    spec:
+      containers:
+        - name: gpu-job
+          image: nvcr.io/nvidia/k8s/cuda-sample:vectoradd-cuda12.5.0
+          command: ["nvidia-smi"]
+      restartPolicy: Never
+  backoffLimit: 0

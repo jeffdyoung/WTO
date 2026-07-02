@@ -1,0 +1,44 @@
+# GPU profile with Node placement.
+# Uses DRA to allocate a Tesla T4 via CEL selector and static nodeSelector
+# to target GPU-labeled nodes. Includes a toleration for GPU node taints.
+#
+# Use Node placement when:
+#   - The cluster does not have Kueue
+#   - You need specific node constraints (instance type, availability zone)
+#   - Simplicity is preferred over Kueue's quota management
+apiVersion: workload-tuning.io/v1alpha1
+kind: WorkloadProfile
+metadata:
+  name: gpu-t4-node
+  namespace: wto-examples
+  annotations:
+    workload-tuning.io/display-name: "Tesla T4 (Node Placement)"
+    workload-tuning.io/description: "1x Tesla T4 GPU with static node targeting"
+spec:
+  defaults:
+    resources:
+      requests:
+        cpu: "2"
+        memory: 4Gi
+      limits:
+        cpu: "4"
+        memory: 8Gi
+  deviceClaims:
+    - name: gpu
+      request:
+        name: gpu
+        exactly:
+          deviceClassName: gpu.nvidia.com
+          count: 1
+          selectors:
+            - cel:
+                expression: 'device.attributes["gpu.nvidia.com"].productName == "Tesla T4"'
+  placement:
+    type: Node
+    node:
+      nodeSelector:
+        nvidia.com/gpu.present: "true"
+      tolerations:
+        - key: nvidia.com/gpu
+          operator: Exists
+          effect: NoSchedule

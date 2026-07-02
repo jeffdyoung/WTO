@@ -1,0 +1,45 @@
+# KServe InferenceService with per-container targeted GPU profile.
+#
+# Uses the gpu-t4-kserve profile which targets "kserve-container" by name,
+# leaving KServe's sidecar containers (kube-rbac-proxy, agent) untouched.
+#
+# The annotation is on the InferenceService CR metadata. KServe propagates
+# it to the Deployment pod template.
+#
+# Prerequisites:
+#   - RHOAI or ODH installed with KServe component enabled
+#   - A ServingRuntime registered in the namespace
+#   - KServe configured for RawDeployment mode (no Knative required)
+apiVersion: serving.kserve.io/v1alpha1
+kind: ServingRuntime
+metadata:
+  name: gpu-runtime
+  namespace: wto-examples
+spec:
+  supportedModelFormats:
+    - name: custom
+      version: "1"
+      autoSelect: true
+  containers:
+    - name: kserve-container
+      image: nvcr.io/nvidia/k8s/cuda-sample:vectoradd-cuda12.5.0
+      command: ["sleep", "infinity"]
+      ports:
+        - containerPort: 8080
+          protocol: TCP
+---
+apiVersion: serving.kserve.io/v1beta1
+kind: InferenceService
+metadata:
+  name: gpu-model
+  namespace: wto-examples
+  annotations:
+    serving.kserve.io/deploymentMode: RawDeployment
+    workload-tuning.io/profile-name: gpu-t4-kserve
+spec:
+  predictor:
+    model:
+      modelFormat:
+        name: custom
+        version: "1"
+      runtime: gpu-runtime

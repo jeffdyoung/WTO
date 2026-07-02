@@ -1,0 +1,51 @@
+# GPU profile with Queue placement.
+# Uses DRA for GPU allocation and Kueue for workload admission and quota.
+# Kueue creates a Workload object, admits through the ClusterQueue, and
+# manages the scheduling lifecycle.
+#
+# Use Queue placement when:
+#   - Kueue is installed on the cluster
+#   - You need quota management and fair-sharing across teams
+#   - You want Kueue admission tracking (Workload objects, queue metrics)
+#
+# Requirements:
+#   - Kueue operator installed and running
+#   - A ClusterQueue with deviceClassMappings for gpu.nvidia.com
+#   - A LocalQueue named "gpu-queue" in the workload namespace
+#   - Namespace labeled: kueue.openshift.io/managed=true
+#
+# Note: the webhook must fire BEFORE Kueue's webhook (alphabetical ordering)
+# so that Kueue sees the queue-name label at pod CREATE time. The WTO webhook
+# is named "aaa-wto" for this reason.
+apiVersion: workload-tuning.io/v1alpha1
+kind: WorkloadProfile
+metadata:
+  name: gpu-t4-queue
+  namespace: wto-examples
+  annotations:
+    workload-tuning.io/display-name: "Tesla T4 (Kueue Queue)"
+    workload-tuning.io/description: "1x Tesla T4 GPU admitted through Kueue"
+spec:
+  defaults:
+    resources:
+      requests:
+        cpu: "2"
+        memory: 4Gi
+      limits:
+        cpu: "4"
+        memory: 8Gi
+  deviceClaims:
+    - name: gpu
+      request:
+        name: gpu
+        exactly:
+          deviceClassName: gpu.nvidia.com
+          count: 1
+          selectors:
+            - cel:
+                expression: 'device.attributes["gpu.nvidia.com"].productName == "Tesla T4"'
+  placement:
+    type: Queue
+    queue:
+      localQueueName: gpu-queue
+      priorityClass: batch

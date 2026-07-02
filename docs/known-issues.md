@@ -42,6 +42,8 @@ There is no finalizer on the WorkloadProfile to prevent deletion while gated pod
 
 **Impact:** Deleted profiles leave pods permanently gated with no automated recovery path.
 
+**Reproduced:** 2026-07-02 on OCP 4.21. Created profile + quota-blocked pod, deleted profile while pod was gated. Controller logged `ProfileError: "gpu-delete-test" not found` every 10s indefinitely. Pod required manual force-deletion.
+
 **Fix:** Two complementary approaches:
 1. Add a finalizer to WorkloadProfile that prevents deletion while gated pods reference it (with an event telling the user which pods are blocking deletion).
 2. In the PlacementReconciler, when the profile is NotFound, ungate the pod with a warning event ("WorkloadProfile deleted — pod ungated without placement configuration. Resources and DRA claims were set at creation time and remain intact.").
@@ -113,6 +115,26 @@ The pod has a resource configuration from profile generation N but a queue assig
 **Impact:** Profile controller may panic or fail to reconcile on clusters where the scheme is not auto-registered.
 
 **Fix:** Add explicit `utilruntime.Must(resourcev1.AddToScheme(scheme))` in `cmd/main.go`. The current code works on K8s 1.34 because client-go v0.36.0 includes resource.k8s.io/v1 in its default scheme, but this is not guaranteed across versions and should be explicit.
+
+---
+
+### H-6: Defaults profile overrides sidecar container resources
+
+**Location:** `internal/webhook/pod_webhook.go` (injectResources, resolveResources)
+
+**Problem:** When a profile uses `defaults` (no explicit `containers[]` entries), WTO injects the default resources into every container in the pod — including sidecars injected by other controllers. Validated on InferenceService: KServe injects `kube-rbac-proxy` and `agent` sidecars, and WTO overwrote both sidecars' resources with the profile's defaults (100m CPU / 256Mi memory), replacing their original values (e.g., `agent` had 100Mi memory, got overwritten to 256Mi).
+
+This is technically correct per ADR-012 (`defaults` applies to unmatched containers), but practically dangerous for workload types where sidecars are injected outside the user's control. Users creating a "1x T4 GPU" profile with `defaults` don't expect it to reconfigure KServe's auth proxy.
+
+The workaround is to use `containers[]` with explicit name targeting (e.g., `name: kserve-container`), but users won't know this until their sidecars get wrong resources. The failure mode is silent — no warning is emitted when defaults override sidecar resources.
+
+**Impact:** Sidecar containers get unexpected resource values. Can cause OOM kills (if defaults are lower than sidecar requirements) or waste quota (if defaults are higher).
+
+**Fix:** Options:
+1. Emit a warning annotation or event when defaults override containers that were not present in the original pod spec submission (i.e., injected by other webhooks/controllers).
+2. Add a `skipContainers` list to the profile spec for excluding known sidecars.
+3. Only apply defaults to the first container (index 0) by convention, requiring explicit `containers[]` entries for others. This would be a behavioral change from the current ADR-012 design.
+4. Document the limitation prominently in the README and recommend `containers[]` targeting for any workload type with known sidecars (InferenceService, Notebooks with OAuth proxy).
 
 ---
 

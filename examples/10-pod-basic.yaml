@@ -1,0 +1,17 @@
+# Basic pod with WTO profile annotation.
+# The webhook injects resources, DRA claims, scheduling gate, and placement.
+# The controller validates quota, sets nodeSelector/tolerations, and removes the gate.
+# After ungating, the DRA scheduler allocates the GPU and places the pod.
+apiVersion: v1
+kind: Pod
+metadata:
+  name: gpu-test-pod
+  namespace: wto-examples
+  annotations:
+    workload-tuning.io/profile-name: gpu-t4-node
+spec:
+  containers:
+    - name: gpu-test
+      image: nvcr.io/nvidia/k8s/cuda-sample:vectoradd-cuda12.5.0
+      command: ["nvidia-smi"]
+  restartPolicy: Never
