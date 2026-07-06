@@ -148,7 +148,7 @@ Profile Controller:
 
 ### Design Principles
 
-- **WTO is a pre-flight validator, not a quota enforcer.** Kueue and ResourceQuota remain the hard enforcement mechanisms. WTO catches violations early and provides actionable feedback.
+- **WTO is a pre-flight validator, not a quota enforcer.** Kueue and ResourceQuota remain the hard enforcement mechanisms. WTO catches violations early and provides actionable feedback. To be explicit: WTO improves failure explanation and avoids obviously impossible scheduling attempts. It does not replace Kubernetes, Kueue, ResourceQuota, the scheduler, or the DRA driver as sources of enforcement. WTO status conditions are best-effort early warnings, not guarantees — a TOCTOU race exists between WTO's check and the pod reaching the actual enforcement point.
 - **Discover, never assume.** WTO reads Kueue, DRA, and node state to understand what's available. It never writes to Kueue objects or DRA resources (except ResourceClaimTemplates it owns).
 - **Embed native types, don't reinvent them.** `corev1.ResourceRequirements` for resources, `resource.k8s.io/v1.DeviceRequest` for DRA. Upstream API additions require only a Go dependency bump and CRD regeneration.
 - **Immutable in webhook, mutable in controller.** The webhook injects fields that Kubernetes makes immutable after pod creation (resources, DRA claims) and adds the scheduling gate. The controller handles fields that remain mutable on gated pods (nodeSelector, tolerations, labels) plus pre-flight validation. This split is dictated by the Kubernetes API, not by preference — validated on K8s 1.34.
@@ -174,6 +174,33 @@ The webhook intercepts pod creation generically. Support for additional workload
 - **Profile templates / inheritance**: no template-to-instance hierarchy. Profiles are standalone.
 - **Automated migration tooling**: no built-in conversion from prior hardware profile systems. Platform operators provide migration documentation and tooling as needed.
 
+## Platform Compatibility
+
+### Currently validated
+
+- **OpenShift 4.21** / Kubernetes 1.34 on AWS (ROSA)
+- NVIDIA GPU Operator v26.3.3 with DRA driver v25.12.0
+- Kueue v1.3.1 (via kueue-operator)
+- RHOAI v3.5.0-ea.2
+
+### OpenShift-specific assumptions in the current implementation
+
+The following components use OpenShift-specific mechanisms that would need alternatives for vanilla Kubernetes:
+
+| Component | OpenShift mechanism | Vanilla K8s alternative | Status |
+|---|---|---|---|
+| **Webhook TLS** | `service.beta.openshift.io/inject-cabundle` / `serving-cert-secret-name` (OpenShift service-ca) | cert-manager with `Certificate` CR | Planned (Phase 8) |
+| **Deployment tooling** | `oc apply` in Makefile | `kubectl apply` / Helm chart | Planned (Phase 8) |
+| **Kueue namespace label** | `kueue.openshift.io/managed: "true"` | Upstream Kueue label convention | Planned (Phase 8) |
+| **OLM packaging** | OLM bundle for OperatorHub | Helm chart | Planned (Phase 8) |
+
+WTO's core design (CRD, webhook, controllers, scheduling gate pattern) is Kubernetes-native and not OpenShift-specific. The portability gap is in deployment and TLS bootstrapping, not in the operator logic.
+
+### Target
+
+- Vanilla Kubernetes 1.34+ with cert-manager and Helm (Phase 8)
+- Any Kubernetes distribution supporting scheduling gates (1.27+) for non-DRA profiles
+
 ## Prerequisites
 
 - Kubernetes 1.27+ (scheduling gates)
@@ -191,9 +218,29 @@ Namespaces using Queue placement need both labels:
 - `workload-tuning.io/enabled: "true"` (WTO webhook)
 - `kueue.openshift.io/managed: "true"` (Kueue webhook)
 
-### Notebook Integration
+### Workload Annotation Placement
 
-For Kubeflow Notebooks, the `workload-tuning.io/profile-name` annotation must be set on both the Notebook CR metadata and in `spec.template.metadata.annotations` to ensure propagation through the StatefulSet to the pod.
+WTO mutates pods, not workload CRs (see ADR-001). The `workload-tuning.io/profile-name` annotation must be present on the **pod** at creation time. Since users create workload CRs (not pods directly), the annotation must be placed where the workload controller will propagate it to the pod template.
+
+This is not a design failure — it is a deliberate trade-off for universality and GitOps compatibility. But it is an adoption tax: platform teams must know the correct annotation path for each workload type.
+
+| Workload Kind | Annotation placement | Notes |
+|---|---|---|
+| **Pod** | `metadata.annotations` | Direct — no propagation needed. |
+| **Job** | `spec.template.metadata.annotations` | Standard pod template path. |
+| **CronJob** | `spec.jobTemplate.spec.template.metadata.annotations` | Nested through Job template. |
+| **Deployment** | `spec.template.metadata.annotations` | Standard pod template path. |
+| **StatefulSet** | `spec.template.metadata.annotations` | Standard pod template path. |
+| **Kubeflow Notebook** | Both `metadata.annotations` AND `spec.template.metadata.annotations` | Notebook controller propagates CR-level annotations to the StatefulSet pod template. Set both to ensure propagation. |
+| **KServe InferenceService** | `metadata.annotations` | KServe propagates CR-level annotations to predictor pods. Validated on RHOAI v3.5.0-ea.2. |
+| **PyTorchJob** | `spec.pytorchReplicaSpecs.<role>.template.metadata.annotations` | Per-replica-type pod template. Set on `Worker`, `Master`, etc. as needed. |
+| **RayJob / RayCluster** | `spec.rayClusterSpec.headGroupSpec.template.metadata.annotations` and `spec.rayClusterSpec.workerGroupSpecs[].template.metadata.annotations` | Separate templates for head and worker groups. |
+| **MPIJob** | `spec.mpiReplicaSpecs.<role>.template.metadata.annotations` | Per-role pod template. |
+| **SparkApplication** | `spec.driver.annotations` and `spec.executor.annotations` | Spark uses a non-standard annotation path. |
+
+**If your workload type is not listed:** check whether the workload controller propagates CR-level annotations to its pod template. If it does, annotate the CR. If it does not, annotate the pod template directly. When in doubt, annotate the pod template — that is the path closest to the pod.
+
+WTO does not validate that the annotation is reachable from a workload CR to its pods. If the annotation is placed incorrectly, the pod is created without it, and the webhook is a no-op — no error, no warning. A future validator (or dashboard integration) could detect workload CRs with the annotation in the wrong location.
 
 ## License
 

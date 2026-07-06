@@ -219,6 +219,14 @@ The webhook is pass-through for embedded types: it copies the struct into the po
 
 The trade-off is that WTO inherits the full surface area of embedded types, including fields that may not be relevant in a profile context (e.g., `DeviceRequest.adminAccess`). This is a dashboard/documentation concern, not a schema problem — the CRD is correct, and UIs can choose which fields to expose.
 
+**WorkloadProfile is an admin/platform-team API, not an end-user API.** The `deviceClaims` field requires writing CEL expressions like `device.attributes["gpu.nvidia.com"].productName == "Tesla T4"`. This is powerful and correct — it exposes the full DRA expression language without WTO inventing a parallel abstraction. But it is not reasonable to expect data scientists or ML engineers to write CEL expressions. The expected usage model is:
+
+1. **Platform admins** create WorkloadProfiles with appropriate resource requirements, CEL device selectors, and placement configuration.
+2. **End users** (data scientists, ML engineers) select profiles by name — via the Dashboard dropdown, a workload annotation, or a namespace default.
+3. **Dashboards** present profiles as human-readable choices (display name, description, GPU type, queue) and hide the CEL/DRA complexity behind annotations.
+
+If WTO profiles are exposed directly to end users without a dashboard or CLI abstraction, adoption will suffer. The CEL expression syntax, DRA ResourceClaimTemplate lifecycle, and placement discriminated union are implementation details that belong behind a UX layer.
+
 If upstream Kubernetes makes a breaking API version change (e.g., `resource.k8s.io/v2`), that requires the same migration effort as any Go import change — a new WTO CRD version with a conversion webhook.
 
 **Alternatives considered:**
@@ -484,6 +492,22 @@ Kubernetes invokes MutatingWebhookConfigurations in alphabetical order by name. 
 The name `aaa-wto` is unconventional but explicit about its purpose. The ordering guarantee is stable — Kubernetes alphabetical ordering of MutatingWebhookConfigurations is part of the API contract.
 
 Namespaces using Queue placement must have both labels: `workload-tuning.io/enabled: "true"` (for WTO's webhook) and `kueue.openshift.io/managed: "true"` (for Kueue's webhook).
+
+**⚠ Fragility Warning:**
+
+Alphabetical webhook ordering is an operational convention, not a strong contract. While Kubernetes does invoke MutatingWebhookConfigurations in alphabetical order by name (this is part of the API server implementation), the mechanism has inherent risks:
+
+- **Naming collisions.** Any third-party operator that also names its webhook `aa-*` or `aaa-*` could sort before `aaa-wto`, breaking the guarantee. There is no reservation system for webhook names.
+- **No declarative ordering.** Kubernetes provides no first-class webhook ordering mechanism (no `before:`/`after:` fields). Alphabetical sorting is the only lever, and it is implicit — nothing in the webhook manifest declares the dependency on firing before Kueue.
+- **Silent breakage.** If ordering breaks (Kueue fires first, sees no queue label, skips the pod), the failure mode is silent: the pod is created, WTO adds the label, but no Kueue Workload object is ever created. The pod sits Pending with no Kueue events. Diagnosing this requires knowledge of webhook ordering semantics.
+
+**Mitigations required:**
+
+1. **CI conformance test.** A test should verify that after deploying both WTO and Kueue, the webhook ordering is correct: create a pod with a Queue-mode profile and assert that a Kueue Workload object is created within a reasonable timeout.
+2. **Startup validation.** The operator should list MutatingWebhookConfigurations at startup and emit a Warning event if any webhook sorts before `aaa-wto` in namespaces where WTO is enabled.
+3. **Documentation.** Operators deploying third-party admission webhooks alongside WTO must verify ordering. This ADR should be referenced in troubleshooting guides.
+
+This is one of the highest-risk areas of the current design. The mechanism works today but is not robust against ecosystem changes. A Kubernetes-native webhook ordering mechanism (proposed but not yet accepted upstream) would be the proper long-term fix.
 
 **Alternatives considered:**
 
