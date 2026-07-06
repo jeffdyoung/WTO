@@ -7,6 +7,7 @@ import (
 	"net/http"
 
 	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -56,6 +57,13 @@ func (w *PodMutatingWebhook) Handle(ctx context.Context, req admission.Request) 
 	if reason := w.checkBlockingConflicts(pod, profile); reason != "" {
 		log.Info("blocking conflict detected", "reason", reason)
 		return admission.Denied(fmt.Sprintf("WorkloadProfile %q conflict: %s", profileName, reason))
+	}
+
+	if len(profile.Spec.DeviceClaims) > 0 && !isConditionTrue(profile, wtov1alpha1.ConditionValid) {
+		msg := fmt.Sprintf("WorkloadProfile %q is not yet ready — the profile controller has not finished "+
+			"creating ResourceClaimTemplates. Retry in a few seconds.", profileName)
+		log.Info("profile not valid, rejecting pod", "profile", profileName)
+		return admission.Denied(msg)
 	}
 
 	overrides := w.injectResources(pod, &profile.Spec)
@@ -209,6 +217,15 @@ func (w *PodMutatingWebhook) checkBlockingConflicts(pod *corev1.Pod, profile *wt
 	}
 
 	return ""
+}
+
+func isConditionTrue(profile *wtov1alpha1.WorkloadProfile, condType string) bool {
+	for _, c := range profile.Status.Conditions {
+		if c.Type == condType {
+			return c.Status == metav1.ConditionTrue
+		}
+	}
+	return false
 }
 
 func (w *PodMutatingWebhook) setTrackingAnnotations(pod *corev1.Pod, profile *wtov1alpha1.WorkloadProfile, overrides []string) {

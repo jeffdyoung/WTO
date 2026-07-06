@@ -18,17 +18,15 @@ ADR-009 explicitly states the mitigation (multiple replicas, anti-affinity, live
 
 ---
 
-### C-2: Webhook references ResourceClaimTemplates before ProfileReconciler creates them
+### C-2: Webhook references ResourceClaimTemplates before ProfileReconciler creates them — FIXED
 
-**Location:** `internal/webhook/pod_webhook.go` (injectDRAClaims), `internal/controller/profile_controller.go` (ensureResourceClaimTemplate)
+**Location:** `internal/webhook/pod_webhook.go`
 
-**Problem:** A user creates a WorkloadProfile with deviceClaims and immediately creates a pod referencing that profile. The webhook fires synchronously during pod CREATE, generates the template name `wto-<profile>-<claim>`, and injects a `ResourceClaimTemplateName` reference into `pod.spec.resourceClaims`. If the ProfileReconciler has not yet reconciled, the ResourceClaimTemplate does not exist. The pod is admitted with a dangling reference — the DRA scheduler cannot find the template, and the pod goes Pending with a confusing error.
+**Problem:** A user creates a WorkloadProfile with deviceClaims and immediately creates a pod referencing that profile. The webhook fires synchronously during pod CREATE, generates the template name `wto-<profile>-<claim>`, and injects a `ResourceClaimTemplateName` reference into `pod.spec.resourceClaims`. If the ProfileReconciler has not yet reconciled, the ResourceClaimTemplate does not exist. The pod would be admitted with a dangling reference.
 
-The webhook does not check whether the template exists, and does not check the profile's `Valid` condition status.
+**Fix (implemented 2026-07-06):** The webhook now checks the profile's `Valid` condition before DRA injection. If the profile has `deviceClaims` and `Valid` is not `True` (either not set or explicitly `False`), the webhook denies the pod with: "WorkloadProfile is not yet ready — the profile controller has not finished creating ResourceClaimTemplates. Retry in a few seconds." A brand-new profile has no conditions, so `Valid` is not True until the profile controller reconciles and creates all ResourceClaimTemplates.
 
-**Impact:** Pods created immediately after a new profile are admitted with dangling DRA references, leading to Pending pods with unclear errors.
-
-**Fix:** The webhook should verify that the ResourceClaimTemplate `wto-<profile>-<claim>` exists before referencing it. If it does not exist, return an admission error with a clear message ("WorkloadProfile gpu-t4 is not yet ready — ResourceClaimTemplate wto-gpu-t4-gpu has not been created. Retry in a few seconds."). Alternatively, check the profile's `Valid` condition.
+**Note:** The race window on a healthy single-replica cluster is sub-second (profile controller reconciles within milliseconds). The fix is a safety net for high-load clusters where the controller queue depth causes delays.
 
 ---
 
