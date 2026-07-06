@@ -61,8 +61,9 @@ func main() {
 	}
 
 	if err := (&wtocontroller.ProfileReconciler{
-		Client: mgr.GetClient(),
-		Scheme: mgr.GetScheme(),
+		Client:   mgr.GetClient(),
+		Scheme:   mgr.GetScheme(),
+		Recorder: mgr.GetEventRecorderFor("wto-profile"),
 	}).SetupWithManager(mgr); err != nil {
 		log.Error(err, "unable to create profile controller")
 		os.Exit(1)

@@ -32,21 +32,17 @@ The webhook does not check whether the template exists, and does not check the p
 
 ---
 
-### C-3: Deleted WorkloadProfile causes permanently stuck pods
+### C-3: Deleted WorkloadProfile causes permanently stuck pods — FIXED
 
-**Location:** `internal/controller/placement_controller.go` (Reconcile, lines 47-54)
+**Location:** `internal/controller/placement_controller.go`, `internal/controller/profile_controller.go`
 
-**Problem:** If a WorkloadProfile is deleted while pods referencing it are still gated, the PlacementReconciler tries to fetch the profile, gets a NotFound error, emits a warning event, and requeues after 10 seconds. This cycle repeats indefinitely. The pod is stuck with the scheduling gate forever.
-
-There is no finalizer on the WorkloadProfile to prevent deletion while gated pods reference it. There is no timeout or fallback to ungate the pod. Manual recovery requires patching the pod to remove the scheduling gate, which is not documented.
-
-**Impact:** Deleted profiles leave pods permanently gated with no automated recovery path.
+**Problem:** If a WorkloadProfile was deleted while pods referencing it were still gated, the PlacementReconciler retried forever on NotFound. Pods were stuck with the scheduling gate permanently.
 
 **Reproduced:** 2026-07-02 on OCP 4.21. Created profile + quota-blocked pod, deleted profile while pod was gated. Controller logged `ProfileError: "gpu-delete-test" not found` every 10s indefinitely. Pod required manual force-deletion.
 
-**Fix:** Two complementary approaches:
-1. Add a finalizer to WorkloadProfile that prevents deletion while gated pods reference it (with an event telling the user which pods are blocking deletion).
-2. In the PlacementReconciler, when the profile is NotFound, ungate the pod with a warning event ("WorkloadProfile deleted — pod ungated without placement configuration. Resources and DRA claims were set at creation time and remain intact.").
+**Fix (implemented, validated 2026-07-06 on OCP 4.21):** Two complementary approaches:
+1. **Finalizer on WorkloadProfile** (`workload-tuning.io/profile-protection`): ProfileReconciler adds a finalizer on reconciliation. On deletion, the finalizer blocks removal while gated pods reference the profile, emitting a `DeletionBlocked` event listing the blocking pod names. Once all gated pods are gone, the finalizer is removed and deletion proceeds.
+2. **Ungate-on-NotFound in PlacementReconciler**: When the profile is NotFound, the controller ungates the pod with a `ProfileDeleted` warning event instead of retrying forever. Resources and DRA claims set at creation time remain intact — the pod proceeds without placement configuration.
 
 ---
 

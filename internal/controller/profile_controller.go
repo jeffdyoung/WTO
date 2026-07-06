@@ -3,6 +3,7 @@ package controller
 import (
 	"context"
 	"fmt"
+	"time"
 
 	corev1 "k8s.io/api/core/v1"
 	resourcev1 "k8s.io/api/resource/v1"
@@ -10,6 +11,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/client-go/tools/record"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
@@ -18,9 +20,12 @@ import (
 	"github.com/jeffdyoung/wto/internal/webhook"
 )
 
+const profileFinalizer = "workload-tuning.io/profile-protection"
+
 type ProfileReconciler struct {
 	client.Client
-	Scheme *runtime.Scheme
+	Scheme   *runtime.Scheme
+	Recorder record.EventRecorder
 }
 
 func (r *ProfileReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
@@ -32,6 +37,17 @@ func (r *ProfileReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 	}
 
 	log.Info("reconciling profile", "deviceClaims", len(profile.Spec.DeviceClaims))
+
+	if !profile.DeletionTimestamp.IsZero() {
+		return r.handleDeletion(ctx, profile)
+	}
+
+	if !controllerutil.ContainsFinalizer(profile, profileFinalizer) {
+		controllerutil.AddFinalizer(profile, profileFinalizer)
+		if err := r.Update(ctx, profile); err != nil {
+			return ctrl.Result{}, fmt.Errorf("add finalizer: %w", err)
+		}
+	}
 
 	for _, claim := range profile.Spec.DeviceClaims {
 		if err := r.ensureResourceClaimTemplate(ctx, profile, claim); err != nil {
@@ -46,6 +62,59 @@ func (r *ProfileReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 	}
 
 	return ctrl.Result{}, nil
+}
+
+func (r *ProfileReconciler) handleDeletion(ctx context.Context, profile *wtov1alpha1.WorkloadProfile) (ctrl.Result, error) {
+	log := ctrl.Log.WithName("profile").WithValues("profile", types.NamespacedName{
+		Namespace: profile.Namespace, Name: profile.Name,
+	})
+
+	if !controllerutil.ContainsFinalizer(profile, profileFinalizer) {
+		return ctrl.Result{}, nil
+	}
+
+	gatedPods, err := r.findGatedPodsForProfile(ctx, profile)
+	if err != nil {
+		return ctrl.Result{}, fmt.Errorf("list gated pods: %w", err)
+	}
+
+	if len(gatedPods) > 0 {
+		podNames := make([]string, len(gatedPods))
+		for i, p := range gatedPods {
+			podNames[i] = p.Name
+		}
+		r.Recorder.Eventf(profile, corev1.EventTypeWarning, "DeletionBlocked",
+			"Cannot delete WorkloadProfile: %d gated pod(s) still reference it: %v. "+
+				"Delete the pods or wait for them to be ungated.", len(gatedPods), podNames)
+		log.Info("deletion blocked by gated pods", "count", len(gatedPods), "pods", podNames)
+		return ctrl.Result{RequeueAfter: 10 * time.Second}, nil
+	}
+
+	controllerutil.RemoveFinalizer(profile, profileFinalizer)
+	if err := r.Update(ctx, profile); err != nil {
+		return ctrl.Result{}, fmt.Errorf("remove finalizer: %w", err)
+	}
+
+	log.Info("finalizer removed, profile will be deleted")
+	return ctrl.Result{}, nil
+}
+
+func (r *ProfileReconciler) findGatedPodsForProfile(ctx context.Context, profile *wtov1alpha1.WorkloadProfile) ([]corev1.Pod, error) {
+	podList := &corev1.PodList{}
+	if err := r.List(ctx, podList, client.InNamespace(profile.Namespace)); err != nil {
+		return nil, err
+	}
+
+	var gated []corev1.Pod
+	for _, pod := range podList.Items {
+		if pod.Annotations[webhook.ProfileAnnotation] != profile.Name {
+			continue
+		}
+		if hasSchedulingGate(&pod) {
+			gated = append(gated, pod)
+		}
+	}
+	return gated, nil
 }
 
 func (r *ProfileReconciler) ensureResourceClaimTemplate(ctx context.Context, profile *wtov1alpha1.WorkloadProfile, claim wtov1alpha1.DeviceClaim) error {

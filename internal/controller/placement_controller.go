@@ -6,6 +6,7 @@ import (
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/tools/record"
@@ -48,6 +49,18 @@ func (r *PlacementReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 		Namespace: pod.Namespace,
 		Name:      profileName,
 	}, profile); err != nil {
+		if errors.IsNotFound(err) {
+			log.Info("profile deleted — ungating pod without placement", "profile", profileName)
+			patch := client.MergeFrom(pod.DeepCopy())
+			removeSchedulingGate(pod)
+			if patchErr := r.Patch(ctx, pod, patch); patchErr != nil {
+				return ctrl.Result{}, fmt.Errorf("ungate pod after profile deletion: %w", patchErr)
+			}
+			r.Recorder.Eventf(pod, corev1.EventTypeWarning, "ProfileDeleted",
+				"WorkloadProfile %q was deleted — pod ungated without placement configuration. "+
+					"Resources and DRA claims set at creation time remain intact.", profileName)
+			return ctrl.Result{}, nil
+		}
 		r.Recorder.Eventf(pod, corev1.EventTypeWarning, "ProfileError",
 			"Failed to load WorkloadProfile %q: %v", profileName, err)
 		return ctrl.Result{RequeueAfter: 10 * time.Second}, nil
