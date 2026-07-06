@@ -3,7 +3,7 @@ AUTHFILE ?= $(HOME)/.docker/config.json
 CONTAINER_RUNTIME ?= podman
 GO_CONTAINER := docker.io/golang:1.26
 
-.PHONY: build generate manifests docker-build docker-push deploy undeploy test tidy
+.PHONY: build generate manifests docker-build docker-push deploy undeploy test test-local tidy
 
 tidy:
 	$(CONTAINER_RUNTIME) run --rm -v $$(pwd):/workspace:Z -w /workspace $(GO_CONTAINER) go mod tidy
@@ -22,7 +22,10 @@ generate: tidy
 
 test:
 	$(CONTAINER_RUNTIME) run --rm -v $$(pwd):/workspace:Z -w /workspace $(GO_CONTAINER) \
-		go test ./... -v
+		go test ./... -v -count=1
+
+test-local:
+	go test ./internal/... -v -count=1
 
 docker-build:
 	$(CONTAINER_RUNTIME) build -t $(IMG) .
