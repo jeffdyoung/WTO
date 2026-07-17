@@ -43,7 +43,7 @@ Last updated: 2026-07-15
 
 | Requirement | Evidence | WTO Role | Status |
 |---|---|---|---|
-| Profile CRD + reconciler (single owner) | — | **Primary** — WorkloadProfileTemplate + WorkloadProfile two-CRD model | **Built** (single-CRD); needs two-CRD refactor |
+| Profile CRD + reconciler (single owner) | — | **Primary** — WorkloadProfileTemplate + WorkloadProfile two-CRD model | **Built** — two-CRD model implemented (2026-07-17) |
 | Per-container resource targeting (name/index) | RHAIRFE-834, RHAISTRAT-1164, RHOAIENG-49069 | **Primary** — ADR-012 | **Built**, but init containers not handled (M-1) |
 | nodeSelector + tolerations in profile | RHOAIENG-26497, RHOAIENG-50827 | **Primary** — `placement.node` | **Built** |
 | Merge semantics (additive tolerations) | RHOAIENG-47369, RHOAIENG-47774 | **Primary** — ADR-003 | **Built** |
@@ -134,9 +134,9 @@ Last updated: 2026-07-15
 
 | Requirement | Evidence | WTO Role | Status |
 |---|---|---|---|
-| GPU topology and utilization dashboard | RHAISTRAT-1757, RHAIRFE-1789 | **Model C: provider** — `resolvedSpec` carries device info for workload-to-GPU correlation | **Not built** — `resolvedSpec` contract needed |
+| GPU topology and utilization dashboard | RHAISTRAT-1757, RHAIRFE-1789 | **Model C: provider** — `resolvedSpec` carries device info for workload-to-GPU correlation | **Partial** — `resolvedSpec` written to status (2026-07-17); consumer SDK not formalized |
 | GPU metrics in model serving dashboards | RHAIRFE-1862, RHAISTRAT-1895 | None — COO + DCGM | N/A |
-| DCGM metrics correlation with Ray/training | RHAIRFE-2544 | **Label provider** — profile name as pod label for metric correlation | **Not built** — profile name is annotation not label |
+| DCGM metrics correlation with Ray/training | RHAIRFE-2544 | **Label provider** — profile name as pod label for metric correlation | **Built** (2026-07-17) — webhook sets `workload-template.io/profile-name` and `workload-template.io/template-name` as pod labels |
 | Per-team GPU utilization observability | RHAIRFE-1819, RHAIRFE-1717 | None — COO dashboards + Kueue queue metrics | N/A |
 | GPU fleet health monitoring | RHAIRFE-2601, RHAIRFE-2598 | None — vendor GPU operators | N/A |
 | GPU card failure alerts | RFE-5641 | None — vendor GPU operators | N/A |
@@ -144,7 +144,7 @@ Last updated: 2026-07-15
 | Proactive GPU resource limit alerting for DSPs | RHAIRFE-2150 | None — OCP Monitoring alert rules | N/A |
 | DRA resource visibility in OCP console | RFE-9480 | None — OCP upstream | N/A |
 
-**Scorecard: 0 built, 0 partial, 2 not built (resolvedSpec, cost label), 7 not WTO scope.**
+**Scorecard: 1 built (cost labels), 1 partial (resolvedSpec), 0 not built, 7 not WTO scope.**
 
 ---
 
@@ -154,15 +154,15 @@ Last updated: 2026-07-15
 
 | Requirement | Evidence | WTO Role | Status |
 |---|---|---|---|
-| Per-tenant GPU usage reporting | RHAIRFE-2294, RHAISTRAT-1821 | **Metadata provider** — profile labels on pods for OpenCost attribution | **Not built** — annotation not label, OpenCost can't select |
-| GPU compute accounting and chargeback | RHAIRFE-2607, RHAIRFE-2600 | **Metadata provider** — same gap | **Not built** |
-| GPU cost tracking per workload | RHAIRFE-1725, RHAIRFE-1699 | **Metadata provider** — same gap | **Not built** |
+| Per-tenant GPU usage reporting | RHAIRFE-2294, RHAISTRAT-1821 | **Metadata provider** — profile labels on pods for OpenCost attribution | **Built** (2026-07-17) — profile name set as pod label |
+| GPU compute accounting and chargeback | RHAIRFE-2607, RHAIRFE-2600 | **Metadata provider** — profile + template labels on pods | **Built** (2026-07-17) |
+| GPU cost tracking per workload | RHAIRFE-1725, RHAIRFE-1699 | **Metadata provider** — profile + template labels on pods | **Built** (2026-07-17) |
 | Cost visualization dashboard | RHAIRFE-1726 | None — COO Perses dashboards | N/A |
 | Showback/chargeback reporting | RHAIRFE-1727 | None — OpenCost | N/A |
 | Budget alerts and controls | RHAIRFE-1728 | None — OCP Monitoring AlertManager rules | N/A |
 | Loki-based showback | RHAISTRAT-1314 | None — Loki pipeline | N/A |
 
-**Scorecard: 0 built, 0 partial, 3 not built (all blocked by label gap), 4 not WTO scope.**
+**Scorecard: 3 built (label gap closed 2026-07-17), 0 partial, 0 not built, 4 not WTO scope.**
 
 ---
 
@@ -312,13 +312,13 @@ Ordered by number of categories blocked.
 
 WorkloadProfile status must expose the fully-resolved spec (template + overrides merged) as a stable API that component teams and the dashboard consume. This is the foundation of Model C — without it, every consumer reimplements profile resolution and the HWP bug class recurs.
 
-**Depends on:** Two-CRD refactor (gap #2).
+**Status: CLOSED (2026-07-17).** `resolvedSpec` is written to `WorkloadProfile.Status.ResolvedSpec` by the profile controller. Consumer SDK not yet formalized.
 
 ### 2. Two-CRD refactor (WorkloadProfileTemplate + WorkloadProfile)
 
 **Blocks:** Categories 2, 8 (template reuse, drift detection, capacity discovery)
 
-Current implementation is single-CRD. The two-CRD model (cluster-scoped template + namespace-scoped binding) is required for admin template reuse, `resolvedSpec` computation, and drift detection.
+**Status: CLOSED (2026-07-17).** Two-CRD model implemented: cluster-scoped `WorkloadProfileTemplate` + namespace-scoped `WorkloadProfile` with `templateRef`, `namespaceSelector` ACL, and template resolution in the profile controller. Additionally, a third CRD `WorkloadTypeConfig` was added for pluggable workload type registration.
 
 **Design:** `template-binding-design.md`
 
@@ -334,9 +334,7 @@ Constants are declared in Go types but never set by any controller. The profile 
 
 **Blocks:** Categories 6, 7 (observability, cost attribution)
 
-Profile name is currently set as `workload-template.io/profile-name` annotation on pods. OpenCost and Prometheus metric queries select by label, not annotation. Adding the profile name as a pod label enables cost attribution and metric correlation.
-
-**Roadmap:** Listed as Phase 1 TODO.
+**Status: CLOSED (2026-07-17).** The webhook now sets both `workload-template.io/profile-name` and `workload-template.io/template-name` as pod labels via `setCostLabels()`. Prometheus and Cost Management can filter by profile and template.
 
 ### 5. Init container support
 

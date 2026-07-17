@@ -67,9 +67,9 @@ spec:
         selectors:
         - cel:
             expression: 'device.attributes["gpu.nvidia.com"].productName == "Tesla T4"'
-  placement:
-    type: Queue
-    queue: { localQueueName: gpu-queue }
+  # NOTE: Placement is NOT on the template — it lives exclusively on the
+  # WorkloadProfile binding (ADR-015). Templates define hardware; bindings
+  # define where workloads run.
 ```
 
 ### WorkloadProfile (binding)

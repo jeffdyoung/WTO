@@ -338,11 +338,11 @@ A single cluster can have profiles using both models simultaneously — some wor
 
 ## ADR-008: Single CRD
 
-**Status:** Accepted
+**Status:** Superseded by ADR-014
 
 **Context:** The WorkloadProfile CRD bundles resource requirements, DRA device claims, and placement configuration in a single object. An alternative design decomposes these into separate CRDs (e.g., ResourceProfile + PlacementPolicy).
 
-**Decision:** WTO uses a single `WorkloadProfile` CRD. Resource requirements, device claims, and placement are structurally separated within the spec (distinct fields, not interleaved) but not split into separate objects.
+**Decision:** ~~WTO uses a single `WorkloadProfile` CRD.~~ This decision was superseded by ADR-014, which introduces a two-CRD model: cluster-scoped `WorkloadProfileTemplate` for admin-managed hardware definitions and namespace-scoped `WorkloadProfile` for tenant bindings with placement. Resource requirements, device claims, and placement are structurally separated within the spec (distinct fields, not interleaved) but not split into separate objects.
 
 **Consequences:**
 

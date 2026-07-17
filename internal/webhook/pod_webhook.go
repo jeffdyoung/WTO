@@ -17,12 +17,14 @@ import (
 )
 
 const (
-	ProfileAnnotation    = "workload-template.io/profile-name"
-	SchedulingGate       = "workload-template.io/scheduling-gate"
-	GenerationAnno       = "workload-template.io/profile-generation"
-	TemplateGenAnno      = "workload-template.io/template-generation"
-	AppliedAtAnno        = "workload-template.io/applied-at"
-	OverridesAnno        = "workload-template.io/overrides"
+	ProfileAnnotation = "workload-template.io/profile-name"
+	SchedulingGate    = "workload-template.io/scheduling-gate"
+	GenerationAnno    = "workload-template.io/profile-generation"
+	TemplateGenAnno   = "workload-template.io/template-generation"
+	OverridesAnno     = "workload-template.io/overrides"
+
+	ProfileLabel  = "workload-template.io/profile-name"
+	TemplateLabel = "workload-template.io/template-name"
 )
 
 type PodMutatingWebhook struct {
@@ -79,6 +81,7 @@ func (w *PodMutatingWebhook) Handle(ctx context.Context, req admission.Request) 
 	w.injectDRAClaims(pod, profile.Name, resolved)
 	w.injectQueueLabel(pod, resolved)
 	w.addSchedulingGate(pod)
+	w.setCostLabels(pod, profile)
 	w.setTrackingAnnotations(pod, profile, overrides)
 
 	marshaledPod, err := json.Marshal(pod)
@@ -234,6 +237,18 @@ func isConditionTrue(profile *wtov1alpha1.WorkloadProfile, condType string) bool
 		}
 	}
 	return false
+}
+
+func (w *PodMutatingWebhook) setCostLabels(pod *corev1.Pod, profile *wtov1alpha1.WorkloadProfile) {
+	if pod.Labels == nil {
+		pod.Labels = map[string]string{}
+	}
+	pod.Labels[ProfileLabel] = profile.Name
+	if profile.Spec.TemplateRef != nil {
+		pod.Labels[TemplateLabel] = *profile.Spec.TemplateRef
+	} else if profile.Status.ResolvedSpec != nil && profile.Status.ResolvedSpec.TemplateRef != nil {
+		pod.Labels[TemplateLabel] = *profile.Status.ResolvedSpec.TemplateRef
+	}
 }
 
 func (w *PodMutatingWebhook) setTrackingAnnotations(pod *corev1.Pod, profile *wtov1alpha1.WorkloadProfile, overrides []string) {

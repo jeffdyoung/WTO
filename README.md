@@ -6,9 +6,17 @@ WTO replaces scattered, webhook-only placement logic with a unified, controller-
 
 ## MVP Scope
 
-### WorkloadProfile CRD
+### Three CRDs
 
-A namespaced Custom Resource that declares what hardware a workload needs and where it should run. The CRD embeds native Kubernetes types — not custom abstractions — so upstream API evolution requires only a dependency bump and CRD regeneration.
+WTO uses a three-CRD model:
+
+- **WorkloadProfileTemplate** (cluster-scoped) — admin-managed hardware definitions: `defaults`, `containers`, `deviceClaims`, `namespaceSelector` ACL. Templates define WHAT hardware to use.
+- **WorkloadProfile** (namespace-scoped) — tenant binding: references a template via `templateRef` (or defines resources inline), adds `placement` (WHERE to run), and optionally sets `targetKind` (WHICH workload type). The profile controller resolves template + placement into `status.resolvedSpec`.
+- **WorkloadTypeConfig** (cluster-scoped) — pluggable workload type registry: describes how each workload type (Notebook, InferenceService, Job, etc.) structures its pod template so WTO can propagate annotations automatically. Cluster admins and components can add/remove types without code changes.
+
+All CRDs embed native Kubernetes types — not custom abstractions — so upstream API evolution requires only a dependency bump and CRD regeneration.
+
+### WorkloadProfile
 
 #### Resource Requirements
 
@@ -38,13 +46,15 @@ A namespaced Custom Resource that declares what hardware a workload needs and wh
 
 WTO continuously validates profiles against live cluster state and reports:
 
-- `Valid` — the profile is structurally correct.
-- `DeviceClassAvailable` — referenced DRA DeviceClasses exist and have devices in the cluster.
-- `QueueReady` — the referenced LocalQueue exists, its backing ClusterQueue covers the requested resources, and framework integrations are enabled.
-- `QuotaFit` — the profile's resource requirements fit within namespace ResourceQuota and ClusterQueue nominal quota.
+- `Valid` — the profile is structurally correct and all dependencies exist.
+- `TemplateFound` / `NamespaceAllowed` — template exists and namespace passes the template's `namespaceSelector` ACL.
+- `DeviceClassAvailable` — referenced DRA DeviceClasses exist.
+- `TargetKindValid` — referenced WorkloadTypeConfig exists and container names are compatible.
+- `QueueReady` — the referenced LocalQueue exists (not yet implemented).
+- `QuotaFit` — the profile's resource requirements fit within namespace quota (not yet implemented).
+- `resolvedSpec` — the fully-merged spec (template hardware + profile placement). This is the single source of truth consumed by the webhook and component teams.
 - `satisfiableNodes` — how many nodes can fulfill the profile.
 - `appliedWorkloads` — how many workloads currently reference the profile.
-- `quotaSummary` — namespace and ClusterQueue quota usage (CPU, memory, devices).
 
 Profiles that are structurally impossible (DeviceClass doesn't exist, zero satisfiable nodes, profile exceeds namespace quota ceiling) are marked with clear conditions and reasons. Transient unavailability (quota temporarily full) is distinguished from permanent misconfiguration.
 
@@ -54,13 +64,14 @@ A `MutatingAdmissionWebhook` with `failurePolicy: Fail` that intercepts pod crea
 
 If the pod carries a `workload-template.io/profile-name` annotation, the webhook:
 
-1. **Reads the WorkloadProfile** referenced by the annotation (from informer cache).
+1. **Reads the WorkloadProfile** and its `status.resolvedSpec` (pre-resolved by the Profile Controller).
 2. **Injects `corev1.ResourceRequirements`** into targeted containers (by name, index, or defaults).
-3. **Injects DRA claim references** if the profile has `deviceClaims`:
-   - Adds `pod.spec.resourceClaims[]` entries referencing pre-created ResourceClaimTemplates (managed by the Profile Controller).
+3. **Injects DRA claim references** if the resolved spec has `deviceClaims`:
+   - Adds `pod.spec.resourceClaims[]` entries referencing pre-created ResourceClaimTemplates.
    - Adds `container.resources.claims[]` references linking targeted containers to their device claims.
 4. **Adds a scheduling gate** (`workload-template.io/scheduling-gate`) to hold the pod for controller-side validation.
-5. **Sets tracking annotations**: `workload-template.io/profile-generation`, `workload-template.io/applied-at`.
+5. **Sets cost attribution labels**: `workload-template.io/profile-name` and `workload-template.io/template-name` as pod labels (Prometheus-visible for cost management and metric correlation).
+6. **Sets tracking annotations**: `workload-template.io/profile-generation`, `workload-template.io/template-generation`, `workload-template.io/overrides`.
 
 If the pod has no profile annotation, the webhook is a no-op.
 
@@ -85,10 +96,30 @@ A controller that reconciles gated pods. It handles all pod spec fields that **a
 
 A controller that reconciles WorkloadProfile CRs:
 
-- Watches DRA ResourceSlices, DeviceClasses, Kueue LocalQueues, ClusterQueues, and namespace ResourceQuota objects.
-- On any change, re-validates affected WorkloadProfiles and updates their status conditions and quota summary.
-- On WorkloadProfile spec change, re-queues all pods referencing that profile for reconciliation on their next restart or update. Does not restart running workloads autonomously.
-- Detects drift: if a workload's actual resources no longer match the profile it references, sets a `Drifted` condition on the pod and emits an event. Does not auto-revert — drift correction happens on the next pod lifecycle event.
+- **Template resolution**: resolves `templateRef` → reads the `WorkloadProfileTemplate`, merges template hardware with profile placement, writes the result to `status.resolvedSpec`.
+- **Namespace ACL**: validates the profile's namespace against the template's `namespaceSelector`. Rejects with `NamespaceAllowed=False` if the namespace doesn't match.
+- **Target kind validation**: if `targetKind` is set, validates container name compatibility against the referenced `WorkloadTypeConfig`.
+- **ResourceClaimTemplate lifecycle**: creates/updates `ResourceClaimTemplate` CRs from `deviceClaims[]`, with owner references for garbage collection.
+- **Status conditions**: `Valid`, `TemplateFound`, `NamespaceAllowed`, `DeviceClassAvailable`, `DRAEnabled`, `TargetKindValid`.
+- **Metrics**: `satisfiableNodes` count, `appliedWorkloads` count.
+- **Finalizer**: `workload-template.io/profile-protection` prevents deletion while gated pods reference the profile.
+- Watches `WorkloadProfileTemplate` changes and re-reconciles bound profiles via field indexer.
+
+### WorkloadType Controller
+
+A controller that reconciles `WorkloadTypeConfig` CRs:
+
+- Checks whether the referenced CRD (e.g., `kubeflow.org/v1 Notebook`) exists on the cluster via the discovery client.
+- Registers dynamic watches on the PropagationReconciler for each available workload type.
+- Reports `CRDAvailable` and `WatchActive` status conditions.
+
+### Propagation Controller
+
+A controller with no static watches — receives dynamic watches from the WorkloadType Controller:
+
+- When a registered workload CR (Notebook, Job, InferenceService, etc.) has the `workload-template.io/profile-name` annotation on its metadata, propagates it to the pod template path defined in the `WorkloadTypeConfig`.
+- Uses the unstructured client for generic CR mutation (works with any CRD without compile-time type knowledge).
+- Skips propagation when `nativePropagation: true` (trusts the component controller to handle it).
 
 ### Kueue Discovery
 
@@ -107,19 +138,50 @@ WTO does not manage Kueue. It discovers and adapts to whatever Kueue installatio
 
 ## Documentation
 
-- [Architecture Decisions](docs/architecture-decisions.md) — ADRs covering injection level, conflict resolution, scheduling gates, quota validation, Kueue integration, DRA strategy, and CRD design.
-- [Roadmap](docs/roadmap.md) — Phased plan from scaffold to production-ready MVP, including integration test matrix and open questions.
+- [Architecture Decisions](docs/architecture-decisions.md) — 16 ADRs covering injection level, conflict resolution, scheduling gates, quota validation, Kueue integration, DRA strategy, CRD design, and template-binding model.
+- [Roadmap](docs/roadmap.md) — 11-phase plan from scaffold to production-ready MVP.
+- [Template-Binding Design](docs/template-binding-design.md) — Two-CRD model rationale and YAML sketches.
+- [Known Issues](docs/known-issues.md) — Open bugs and limitations with severity ratings.
+- [GPUaaS Readiness](docs/wto_gpuaas_readiness.md) — Gap analysis against 530 Jira issues across 13 categories.
+- [Approach Analysis](docs/approach-analysis.md) — Evaluation of 6 injection levels with scoring matrix.
+- [Test Plan](docs/test-plan.md) — Unit, integration, and E2E test strategy.
 
 ## Architecture
 
 ```
-Pod CREATE
+WorkloadProfileTemplate (cluster-scoped, admin-managed)
+  │
+  ▼
+Profile Controller:
+  ├── Resolve template + placement → status.resolvedSpec
+  ├── Validate namespace ACL, targetKind, DeviceClass availability
+  ├── Create/update ResourceClaimTemplates from deviceClaims
+  └── Update status conditions
+```
+
+```
+WorkloadTypeConfig (cluster-scoped, admin/component-managed)
+  │
+  ▼
+WorkloadType Controller:
+  ├── Check CRD existence (discovery client)
+  └── Register dynamic watch on Propagation Controller
+        │
+        ▼
+Propagation Controller:
+  └── Workload CR (Notebook, Job, etc.) has profile annotation
+      → Propagate annotation to pod template path
+```
+
+```
+Pod CREATE (from any workload controller, or directly)
   │
   ▼
 Webhook (synchronous, immutable fields):
-  ├── Read WorkloadProfile (from cache)
+  ├── Read resolvedSpec from WorkloadProfile status
   ├── Inject resources into containers
-  ├── Inject DRA claim references (to pre-created templates)
+  ├── Inject DRA claim references
+  ├── Set cost labels (profile-name, template-name)
   └── Add scheduling gate
   │
   ▼
@@ -135,17 +197,6 @@ Kueue: suspend, check quota, admit
 kube-scheduler + DRA: allocate devices, bind pod to node
 ```
 
-```
-WorkloadProfile CR changed
-  │
-  ▼
-Profile Controller:
-  ├── Validate against cluster state
-  ├── Create/update ResourceClaimTemplates from deviceClaims
-  ├── Update status conditions + quota summary
-  └── Re-queue affected pods for next reconciliation
-```
-
 ### Design Principles
 
 - **WTO is a pre-flight validator, not a quota enforcer.** Kueue and ResourceQuota remain the hard enforcement mechanisms. WTO catches violations early and provides actionable feedback. To be explicit: WTO improves failure explanation and avoids obviously impossible scheduling attempts. It does not replace Kubernetes, Kueue, ResourceQuota, the scheduler, or the DRA driver as sources of enforcement. WTO status conditions are best-effort early warnings, not guarantees — a TOCTOU race exists between WTO's check and the pod reaching the actual enforcement point.
@@ -156,13 +207,19 @@ Profile Controller:
 
 ## Workload Types
 
-MVP supports mutation of pods created by:
+WTO ships with 5 default `WorkloadTypeConfig` CRs:
 
-- Kubeflow Notebooks (`kubeflow.org/v1`)
-- KServe InferenceServices (`serving.kserve.io/v1beta1`)
-- KServe LLMInferenceServices (`serving.kserve.io/v1alpha1`, `serving.kserve.io/v1alpha2`)
+| Name | GVK | Pod Template Path | Propagation |
+|------|-----|-------------------|-------------|
+| `pod` | core/v1 Pod | n/a | Native (leaf) |
+| `job` | batch/v1 Job | `spec.template` | WTO propagates |
+| `notebook` | kubeflow.org/v1 Notebook | `spec.template` | WTO propagates |
+| `inferenceservice` | serving.kserve.io/v1beta1 InferenceService | `spec.predictor.annotations` | WTO propagates |
+| `pytorchjob` | kubeflow.org/v1 PyTorchJob | `spec.pytorchReplicaSpecs.Worker.template` | WTO propagates |
 
-The webhook intercepts pod creation generically. Support for additional workload types (Jobs, Deployments, StatefulSets, training operators) is additive — no architectural change required.
+Cluster admins can register additional workload types (RayJob, SparkApplication, MPIJob, etc.) by creating new `WorkloadTypeConfig` CRs — no code changes required. Custom types need an accompanying RBAC `ClusterRole` labeled `workload-template.io/aggregate-to-wto: "true"`.
+
+The pod webhook intercepts pod creation generically and remains the universal fallback regardless of WorkloadTypeConfig.
 
 ## Not in MVP
 
@@ -171,7 +228,6 @@ The webhook intercepts pod creation generically. Support for additional workload
 - **Fractional GPU sharing**: MIG profiles are supported via DRA DeviceClasses. LD_PRELOAD-based memory isolation (HAMi-style) is out of scope.
 - **GPU inventory aggregation**: WTO reads DRA ResourceSlices — it does not maintain its own device inventory.
 - **Multi-cluster**: single-cluster only.
-- **Profile templates / inheritance**: no template-to-instance hierarchy. Profiles are standalone.
 - **Automated migration tooling**: no built-in conversion from prior hardware profile systems. Platform operators provide migration documentation and tooling as needed.
 
 ## Platform Compatibility
@@ -220,9 +276,9 @@ Namespaces using Queue placement need both labels:
 
 ### Workload Annotation Placement
 
-WTO mutates pods, not workload CRs (see ADR-001). The `workload-template.io/profile-name` annotation must be present on the **pod** at creation time. Since users create workload CRs (not pods directly), the annotation must be placed where the workload controller will propagate it to the pod template.
+WTO mutates pods, not workload CRs (see ADR-001). The `workload-template.io/profile-name` annotation must be present on the **pod** at creation time. The `PropagationReconciler` automates this for registered workload types: place the annotation on the workload CR's `metadata.annotations`, and WTO propagates it to the pod template path defined in the `WorkloadTypeConfig`.
 
-This is not a design failure — it is a deliberate trade-off for universality and GitOps compatibility. But it is an adoption tax: platform teams must know the correct annotation path for each workload type.
+For workload types without a `WorkloadTypeConfig`, users must place the annotation directly on the pod template. The table below shows the correct path for each type:
 
 | Workload Kind | Annotation placement | Notes |
 |---|---|---|
@@ -238,9 +294,9 @@ This is not a design failure — it is a deliberate trade-off for universality a
 | **MPIJob** | `spec.mpiReplicaSpecs.<role>.template.metadata.annotations` | Per-role pod template. |
 | **SparkApplication** | `spec.driver.annotations` and `spec.executor.annotations` | Spark uses a non-standard annotation path. |
 
-**If your workload type is not listed:** check whether the workload controller propagates CR-level annotations to its pod template. If it does, annotate the CR. If it does not, annotate the pod template directly. When in doubt, annotate the pod template — that is the path closest to the pod.
+**If your workload type is not listed:** create a `WorkloadTypeConfig` CR describing the GVK and pod template path, and WTO will handle propagation automatically. Alternatively, place the annotation on the pod template directly.
 
-WTO does not validate that the annotation is reachable from a workload CR to its pods. If the annotation is placed incorrectly, the pod is created without it, and the webhook is a no-op — no error, no warning. A future validator (or dashboard integration) could detect workload CRs with the annotation in the wrong location.
+For workload types with a `WorkloadTypeConfig`, WTO's `PropagationReconciler` handles annotation propagation automatically — users only need to annotate the workload CR's `metadata.annotations`.
 
 ## License
 

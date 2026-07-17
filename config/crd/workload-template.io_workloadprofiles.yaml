@@ -888,6 +888,13 @@ spec:
                   rule: 'self.type == ''Node'' ? !has(self.queue) : true'
                 - message: node must not be set when type is Queue
                   rule: 'self.type == ''Queue'' ? !has(self.node) : true'
+              targetKind:
+                description: |-
+                  References a WorkloadTypeConfig by name. When set, the profile controller
+                  validates container targeting against the workload type's known containers
+                  and the propagation controller ensures the profile annotation reaches pods
+                  created by this workload type.
+                type: string
               templateRef:
                 description: |-
                   TemplateRef is the name of a cluster-scoped WorkloadProfileTemplate.
@@ -1834,6 +1841,13 @@ spec:
                       rule: 'self.type == ''Node'' ? !has(self.queue) : true'
                     - message: node must not be set when type is Queue
                       rule: 'self.type == ''Queue'' ? !has(self.node) : true'
+                  targetKind:
+                    description: |-
+                      References a WorkloadTypeConfig by name. When set, the profile controller
+                      validates container targeting against the workload type's known containers
+                      and the propagation controller ensures the profile annotation reaches pods
+                      created by this workload type.
+                    type: string
                   templateRef:
                     description: |-
                       TemplateRef is the name of a cluster-scoped WorkloadProfileTemplate.

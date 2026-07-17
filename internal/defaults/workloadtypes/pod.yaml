@@ -1,0 +1,13 @@
+apiVersion: workload-template.io/v1alpha1
+kind: WorkloadTypeConfig
+metadata:
+  name: pod
+  labels:
+    workload-template.io/managed-by: wto-defaults
+spec:
+  group: ""
+  version: v1
+  kind: Pod
+  resource: pods
+  podTemplatePath: "metadata"
+  nativePropagation: true

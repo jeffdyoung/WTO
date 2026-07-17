@@ -48,6 +48,45 @@ rules:
 - apiGroups: ["resource.k8s.io"]
   resources: ["deviceclasses"]
   verbs: ["get", "list", "watch"]
+# WorkloadTypeConfig lifecycle
+- apiGroups: ["workload-template.io"]
+  resources: ["workloadtypeconfigs"]
+  verbs: ["get", "list", "watch", "create"]
+- apiGroups: ["workload-template.io"]
+  resources: ["workloadtypeconfigs/status"]
+  verbs: ["get", "patch", "update"]
+- apiGroups: ["workload-template.io"]
+  resources: ["workloadtypeconfigs/finalizers"]
+  verbs: ["update"]
+# CRD existence checks for dynamic watch registration
+- apiGroups: ["apiextensions.k8s.io"]
+  resources: ["customresourcedefinitions"]
+  verbs: ["get", "list", "watch"]
+# Default workload types for annotation propagation
+- apiGroups: ["batch"]
+  resources: ["jobs"]
+  verbs: ["get", "list", "watch", "update", "patch"]
+- apiGroups: ["kubeflow.org"]
+  resources: ["notebooks", "pytorchjobs"]
+  verbs: ["get", "list", "watch", "update", "patch"]
+- apiGroups: ["serving.kserve.io"]
+  resources: ["inferenceservices"]
+  verbs: ["get", "list", "watch", "update", "patch"]
+---
+# Aggregate ClusterRole for custom workload types.
+# Admins create a ClusterRole with the label below to grant WTO
+# permissions on their custom CRD without modifying the operator manifests.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: wto-custom-workloads
+  labels:
+    workload-template.io/aggregate-to-wto: "true"
+aggregationRule:
+  clusterRoleSelectors:
+  - matchLabels:
+      workload-template.io/aggregate-to-wto: "true"
+rules: []
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding

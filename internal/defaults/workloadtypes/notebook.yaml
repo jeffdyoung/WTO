@@ -1,0 +1,15 @@
+apiVersion: workload-template.io/v1alpha1
+kind: WorkloadTypeConfig
+metadata:
+  name: notebook
+  labels:
+    workload-template.io/managed-by: wto-defaults
+spec:
+  group: kubeflow.org
+  version: v1
+  kind: Notebook
+  resource: notebooks
+  podTemplatePath: "spec.template"
+  knownContainerNames:
+    - notebook
+  nativePropagation: false

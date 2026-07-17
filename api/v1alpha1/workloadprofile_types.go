@@ -79,6 +79,13 @@ type WorkloadProfileSpec struct {
 	// LocalQueues and node affinities are namespace-scoped tenant concerns.
 	// +optional
 	Placement *PlacementConfig `json:"placement,omitempty"`
+
+	// References a WorkloadTypeConfig by name. When set, the profile controller
+	// validates container targeting against the workload type's known containers
+	// and the propagation controller ensures the profile annotation reaches pods
+	// created by this workload type.
+	// +optional
+	TargetKind *string `json:"targetKind,omitempty"`
 }
 
 // ResourceDefaults specifies fallback resources for containers not explicitly targeted.
@@ -230,6 +237,7 @@ const (
 	ConditionQuotaFit             = "QuotaFit"
 	ConditionDRAEnabled           = "DRAEnabled"
 	ConditionDrifted              = "Drifted"
+	ConditionTargetKindValid      = "TargetKindValid"
 )
 
 func init() {

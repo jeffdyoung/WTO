@@ -326,6 +326,8 @@ func (r *ProfileReconciler) updateStatus(ctx context.Context, profile *wtov1alph
 		}
 	}
 
+	r.validateTargetKind(ctx, profile, resolved)
+
 	for _, c := range profile.Status.Conditions {
 		if c.Type == wtov1alpha1.ConditionTemplateFound && c.Status == metav1.ConditionFalse {
 			valid = false
@@ -515,6 +517,46 @@ func setCondition(profile *wtov1alpha1.WorkloadProfile, condType string, status 
 		Message:            message,
 		ObservedGeneration: profile.Generation,
 	})
+}
+
+func (r *ProfileReconciler) validateTargetKind(ctx context.Context, profile *wtov1alpha1.WorkloadProfile, resolved *wtov1alpha1.WorkloadProfileSpec) {
+	if profile.Spec.TargetKind == nil {
+		removeCondition(profile, wtov1alpha1.ConditionTargetKindValid)
+		return
+	}
+
+	wtc := &wtov1alpha1.WorkloadTypeConfig{}
+	if err := r.Get(ctx, types.NamespacedName{Name: *profile.Spec.TargetKind}, wtc); err != nil {
+		if errors.IsNotFound(err) {
+			r.setProfileCondition(profile, wtov1alpha1.ConditionTargetKindValid, metav1.ConditionFalse,
+				"NotFound", fmt.Sprintf("WorkloadTypeConfig %q not found", *profile.Spec.TargetKind))
+			return
+		}
+		r.setProfileCondition(profile, wtov1alpha1.ConditionTargetKindValid, metav1.ConditionFalse,
+			"Error", fmt.Sprintf("Failed to get WorkloadTypeConfig %q: %v", *profile.Spec.TargetKind, err))
+		return
+	}
+
+	if len(wtc.Spec.KnownContainerNames) > 0 && len(resolved.Containers) > 0 {
+		knownSet := make(map[string]struct{}, len(wtc.Spec.KnownContainerNames))
+		for _, name := range wtc.Spec.KnownContainerNames {
+			knownSet[name] = struct{}{}
+		}
+		for _, c := range resolved.Containers {
+			if c.Name != nil {
+				if _, ok := knownSet[*c.Name]; !ok {
+					r.setProfileCondition(profile, wtov1alpha1.ConditionTargetKindValid, metav1.ConditionFalse,
+						"ContainerMismatch",
+						fmt.Sprintf("Container %q not in WorkloadTypeConfig %q known containers %v",
+							*c.Name, *profile.Spec.TargetKind, wtc.Spec.KnownContainerNames))
+					return
+				}
+			}
+		}
+	}
+
+	r.setProfileCondition(profile, wtov1alpha1.ConditionTargetKindValid, metav1.ConditionTrue,
+		"Valid", fmt.Sprintf("Compatible with workload type %q (%s)", *profile.Spec.TargetKind, wtc.Spec.Kind))
 }
 
 func removeCondition(profile *wtov1alpha1.WorkloadProfile, condType string) {

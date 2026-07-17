@@ -2,7 +2,7 @@
 
 This document tracks the path from design to production-ready MVP.
 
-**Last updated:** 2026-07-01
+**Last updated:** 2026-07-17
 **Cluster:** OCP 4.21.21 / K8s 1.34.8, 2x Tesla T4 (g4dn.xlarge)
 **Image:** `quay.io/jeffdyoung/wto:latest`
 
@@ -34,7 +34,7 @@ This document tracks the path from design to production-ready MVP.
 - [x] Injects `container.resources.claims[]` linking containers to claims
 - [x] Adds scheduling gate
 - [x] Sets tracking annotations (`profile-generation`, `overrides`)
-- [ ] **Inject profile name as a pod label** (not just annotation) for cost attribution. Cost Management and other metrics platforms (OpenCost, Kubecost, Thanos) only read pod labels — annotations are invisible to tag-based cost filtering. The webhook must set `workload-template.io/profile-name` as both a label and an annotation. Without this, GPU cost cannot be grouped by workload profile.
+- [x] **Inject profile name as a pod label** (not just annotation) for cost attribution. Webhook sets `workload-template.io/profile-name` and `workload-template.io/template-name` as pod labels via `setCostLabels()`. Implemented 2026-07-17.
 - [x] TLS via OpenShift service-ca (no cert-manager needed)
 - [x] Container targeting: by name, by index, defaults fallback
 
@@ -139,6 +139,42 @@ This document tracks the path from design to production-ready MVP.
 - [ ] GitOps compatibility (ArgoCD sees no drift on workload CRs)
 - [ ] Scale: 50 profiles, 100 simultaneous pods
 
+## Phase 7a: Two-CRD Template-Binding Model — DONE (2026-07-17)
+
+**Goal:** Cluster-scoped templates with namespace-scoped bindings for admin reuse and tenant isolation.
+
+- [x] `WorkloadProfileTemplate` CRD (cluster-scoped) with `defaults`, `containers`, `deviceClaims`, `namespaceSelector`
+- [x] `WorkloadProfile.spec.templateRef` references a template by name
+- [x] CEL validation: template mode and inline mode are mutually exclusive
+- [x] Profile controller resolves template + placement into `status.resolvedSpec`
+- [x] `namespaceSelector` ACL enforcement — profiles in disallowed namespaces get `NamespaceAllowed=False`
+- [x] Template watch: profile controller re-reconciles bound profiles when template changes
+- [x] Finalizer protection: profiles with gated pods block deletion
+- [x] ADRs 014-016 document the design decisions
+
+## Phase 7b: WorkloadTypeConfig — DONE (2026-07-17)
+
+**Goal:** Pluggable workload type registry for annotation propagation from higher-level CRs to pods.
+
+- [x] `WorkloadTypeConfig` CRD (cluster-scoped) — registry for workload types with GVK, `podTemplatePath`, `annotationPaths`, `knownContainerNames`, `nativePropagation`
+- [x] `WorkloadProfile.spec.targetKind` — optional reference to a WorkloadTypeConfig by name
+- [x] `WorkloadTypeReconciler` — watches WorkloadTypeConfig CRs, checks CRD existence via discovery, registers dynamic watches
+- [x] `PropagationReconciler` — receives dynamic watches, propagates profile annotation from parent CR to pod template using unstructured client
+- [x] 5 default configs shipped embedded (pod, job, notebook, inferenceservice, pytorchjob)
+- [x] Aggregate ClusterRole pattern for admin-added custom workload types
+- [x] CEL validation: at least one of `podTemplatePath` or `annotationPaths` required
+- [x] `TargetKindValid` status condition on profiles for container name compatibility validation
+- [x] CRDs validated on OCP 4.21 cluster
+
+## Phase 7c: Cost Attribution Labels — DONE (2026-07-17)
+
+**Goal:** Pods carry labels consumable by Prometheus, Cost Management, and OpenCost for GPU cost attribution.
+
+- [x] Webhook sets `workload-template.io/profile-name` as pod label (not just annotation)
+- [x] Webhook sets `workload-template.io/template-name` as pod label for template-mode profiles
+- [x] Removed dead `AppliedAtAnno` constant
+- [x] `kueue.x-k8s.io/queue-name` already set as label (from Phase 2)
+
 ## Phase 8: OLM Packaging and Release
 
 **Goal:** WTO is installable via OLM on OpenShift and via Helm on vanilla Kubernetes.
@@ -169,7 +205,7 @@ This document tracks the path from design to production-ready MVP.
 - [ ] Multiple replicas, anti-affinity, leader election, `system-cluster-critical`
 - [ ] Prometheus metrics (`wto_pods_gated`, `wto_gate_duration_seconds`, etc.)
 - [ ] ServiceMonitor + PrometheusRule for OpenShift monitoring
-- [ ] Cost attribution labels: ensure all pods injected by WTO carry labels consumable by cost platforms (Cost Management, OpenCost, Thanos). At minimum: `workload-template.io/profile-name`, `kueue.x-k8s.io/queue-name` (already done), and `opendatahub.io/workload-type` if workload type is known
+- [x] Cost attribution labels: `workload-template.io/profile-name` and `workload-template.io/template-name` set as pod labels (Phase 7c). `kueue.x-k8s.io/queue-name` already set (Phase 2). Remaining: `opendatahub.io/workload-type` if workload type is known
 - [ ] Benchmark: gate-to-ungate < 2s p95 (resource-only), < 5s p95 (DRA)
 - [ ] NetworkPolicy, Pod Security Standards compliance
 

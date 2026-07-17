@@ -337,6 +337,62 @@ func (b *TemplateBuilder) Build() *wtov1alpha1.WorkloadProfileTemplate {
 	return b.template.DeepCopy()
 }
 
+// --- WorkloadTypeConfig Builder ---
+
+type WTCBuilder struct {
+	wtc *wtov1alpha1.WorkloadTypeConfig
+}
+
+func NewWTC(name string) *WTCBuilder {
+	return &WTCBuilder{
+		wtc: &wtov1alpha1.WorkloadTypeConfig{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:       name,
+				Generation: 1,
+			},
+		},
+	}
+}
+
+func (b *WTCBuilder) WithGVKR(group, version, kind, resource string) *WTCBuilder {
+	b.wtc.Spec.Group = group
+	b.wtc.Spec.Version = version
+	b.wtc.Spec.Kind = kind
+	b.wtc.Spec.Resource = resource
+	return b
+}
+
+func (b *WTCBuilder) WithPodTemplatePath(path string) *WTCBuilder {
+	b.wtc.Spec.PodTemplatePath = &path
+	return b
+}
+
+func (b *WTCBuilder) WithAnnotationPaths(paths ...string) *WTCBuilder {
+	b.wtc.Spec.AnnotationPaths = paths
+	return b
+}
+
+func (b *WTCBuilder) WithKnownContainers(names ...string) *WTCBuilder {
+	b.wtc.Spec.KnownContainerNames = names
+	return b
+}
+
+func (b *WTCBuilder) WithNativePropagation(v bool) *WTCBuilder {
+	b.wtc.Spec.NativePropagation = v
+	return b
+}
+
+func (b *WTCBuilder) Build() *wtov1alpha1.WorkloadTypeConfig {
+	return b.wtc.DeepCopy()
+}
+
+// --- ProfileBuilder additions ---
+
+func (b *ProfileBuilder) WithTargetKind(name string) *ProfileBuilder {
+	b.profile.Spec.TargetKind = &name
+	return b
+}
+
 // --- Admission Request Helper ---
 
 func NewAdmissionRequest(pod *corev1.Pod) admission.Request {

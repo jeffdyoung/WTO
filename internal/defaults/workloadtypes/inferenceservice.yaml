@@ -1,0 +1,16 @@
+apiVersion: workload-template.io/v1alpha1
+kind: WorkloadTypeConfig
+metadata:
+  name: inferenceservice
+  labels:
+    workload-template.io/managed-by: wto-defaults
+spec:
+  group: serving.kserve.io
+  version: v1beta1
+  kind: InferenceService
+  resource: inferenceservices
+  annotationPaths:
+    - "spec.predictor.annotations"
+  knownContainerNames:
+    - kserve-container
+  nativePropagation: false

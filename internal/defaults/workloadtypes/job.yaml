@@ -1,0 +1,14 @@
+apiVersion: workload-template.io/v1alpha1
+kind: WorkloadTypeConfig
+metadata:
+  name: job
+  labels:
+    workload-template.io/managed-by: wto-defaults
+spec:
+  group: batch
+  version: v1
+  kind: Job
+  resource: jobs
+  podTemplatePath: "spec.template"
+  knownContainerNames: []
+  nativePropagation: false

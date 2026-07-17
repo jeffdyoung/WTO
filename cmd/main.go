@@ -1,21 +1,25 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"os"
 
 	"k8s.io/apimachinery/pkg/runtime"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	resourcev1 "k8s.io/api/resource/v1"
+	"k8s.io/client-go/discovery"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
+	"sigs.k8s.io/controller-runtime/pkg/manager"
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 	"sigs.k8s.io/controller-runtime/pkg/webhook"
 	"sigs.k8s.io/controller-runtime/pkg/webhook/admission"
 
 	wtoapi "github.com/jeffdyoung/wto/api/v1alpha1"
 	wtocontroller "github.com/jeffdyoung/wto/internal/controller"
+	"github.com/jeffdyoung/wto/internal/defaults"
 	wtowebhook "github.com/jeffdyoung/wto/internal/webhook"
 )
 
@@ -71,12 +75,43 @@ func main() {
 		os.Exit(1)
 	}
 
+	propagation, err := wtocontroller.NewPropagationReconciler(mgr)
+	if err != nil {
+		log.Error(err, "unable to create propagation controller")
+		os.Exit(1)
+	}
+
+	discoveryClient, err := discovery.NewDiscoveryClientForConfig(ctrl.GetConfigOrDie())
+	if err != nil {
+		log.Error(err, "unable to create discovery client")
+		os.Exit(1)
+	}
+
+	if err := (&wtocontroller.WorkloadTypeReconciler{
+		Client:      mgr.GetClient(),
+		Discovery:   discoveryClient,
+		Propagation: propagation,
+	}).SetupWithManager(mgr); err != nil {
+		log.Error(err, "unable to create workloadtype controller")
+		os.Exit(1)
+	}
+
 	mgr.GetWebhookServer().Register("/mutate-pods", &webhook.Admission{
 		Handler: &wtowebhook.PodMutatingWebhook{
 			Client:  mgr.GetClient(),
 			Decoder: admission.NewDecoder(scheme),
 		},
 	})
+
+	if err := mgr.Add(manager.RunnableFunc(func(ctx context.Context) error {
+		if err := defaults.EnsureDefaults(ctx, mgr.GetClient()); err != nil {
+			log.Error(err, "failed to apply default WorkloadTypeConfigs")
+		}
+		return nil
+	})); err != nil {
+		log.Error(err, "unable to add defaults bootstrapper")
+		os.Exit(1)
+	}
 
 	log.Info("starting manager")
 	if err := mgr.Start(ctrl.SetupSignalHandler()); err != nil {

@@ -100,15 +100,11 @@ The pod has a resource configuration from profile generation N but a queue assig
 
 ---
 
-### H-5: resource.k8s.io/v1 scheme may not be registered
+### H-5: resource.k8s.io/v1 scheme may not be registered — FIXED
 
-**Location:** `cmd/main.go` (lines 23-26)
+**Location:** `cmd/main.go`
 
-**Problem:** The code registers `clientgoscheme` and `wtoapi` into the scheme, but does not explicitly register `resourcev1 "k8s.io/api/resource/v1"`. The ProfileReconciler uses `client.List` for DeviceClassList and `client.Get` for ResourceClaimTemplate. If the client-go version does not include `resource.k8s.io/v1` in its default scheme, these calls return "no kind registered" errors at runtime.
-
-**Impact:** Profile controller may panic or fail to reconcile on clusters where the scheme is not auto-registered.
-
-**Fix:** Add explicit `utilruntime.Must(resourcev1.AddToScheme(scheme))` in `cmd/main.go`. The current code works on K8s 1.34 because client-go v0.36.0 includes resource.k8s.io/v1 in its default scheme, but this is not guaranteed across versions and should be explicit.
+**Fix (implemented 2026-07-17):** `cmd/main.go` now explicitly registers `resourcev1.AddToScheme(scheme)`. The scheme includes clientgoscheme, resourcev1, and wtoapi.
 
 ---
 
@@ -198,7 +194,7 @@ The documents describe `QuotaFit` condition, `quotaSummary` status field, and co
 
 - `pods` has `update` verb, but the code only uses `Patch`. `update` is broader.
 - `workloadprofiles` has `update` and `patch` on the main resource, but the controller only patches the status subresource.
-- `workloadprofiles/finalizers` has `update`, but no finalizer is used. Dead RBAC.
+- ~~`workloadprofiles/finalizers` has `update`, but no finalizer is used. Dead RBAC.~~ **FIXED (2026-07-17):** The finalizer `workload-template.io/profile-protection` is now actively used by the ProfileReconciler for deletion protection.
 - No RBAC for Kueue resources (ClusterQueue, LocalQueue) despite ADR-006 describing read access.
 
 ---
@@ -213,11 +209,9 @@ The documents describe `QuotaFit` condition, `quotaSummary` status field, and co
 
 ---
 
-### L-2: AppliedAtAnno constant defined but never set
+### L-2: AppliedAtAnno constant defined but never set — FIXED
 
-**Location:** `internal/webhook/pod_webhook.go` (line 23)
-
-The constant `AppliedAtAnno = "workload-template.io/applied-at"` is defined but `setTrackingAnnotations` never sets it. The README lists it as a tracking annotation.
+**Fix (2026-07-17):** The `AppliedAtAnno` constant was removed. Cost attribution labels (`workload-template.io/profile-name` and `workload-template.io/template-name`) are now set as pod labels by the webhook via `setCostLabels()`, enabling Prometheus-based cost attribution.
 
 ---
 
