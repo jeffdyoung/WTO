@@ -17,6 +17,9 @@ This document records the architectural decisions made during WTO's design and t
 - [ADR-011: UI Metadata in Annotations](#adr-011-ui-metadata-in-annotations)
 - [ADR-012: Per-Container Targeting](#adr-012-per-container-targeting)
 - [ADR-013: Webhook Ordering for Kueue Integration](#adr-013-webhook-ordering-for-kueue-integration)
+- [ADR-014: Two-CRD Template-Binding Model](#adr-014-two-crd-template-binding-model)
+- [ADR-015: Placement is Binding-Only](#adr-015-placement-is-binding-only)
+- [ADR-016: namespaceSelector for Template Access Control](#adr-016-namespaceselector-for-template-access-control)
 
 ---
 
@@ -516,3 +519,54 @@ This is one of the highest-risk areas of the current design. The mechanism works
 | **`reinvocationPolicy: IfNeeded` on Kueue's webhook** | Tested and confirmed working — Kueue re-invokes after WTO adds the label. However, the Kueue operator actively reconciles its webhook configuration and reverts manual changes. This makes the approach fragile — any Kueue operator reconciliation loop undoes the fix silently. |
 | **WTO injects Kueue's scheduling gate directly** | WTO could add both its own gate and `kueue.x-k8s.io/admission`. This couples WTO to Kueue's internal gate name, which is not part of Kueue's public API and could change between versions. |
 | **Controller-based queue label injection** (original design) | The original design set the queue label in the placement controller, not the webhook. This doesn't work because Kueue's webhook only fires at pod CREATE time — labels added later via patch don't trigger re-invocation. |
+
+---
+
+## ADR-014: Two-CRD Template-Binding Model
+
+**Status:** Accepted. Supersedes ADR-008.
+
+**Context:** ADR-008 chose a single WorkloadProfile CRD. The GPUaaS initiative and RHOAI multi-tenancy requirements revealed that hardware definition and tenant binding are distinct concerns owned by different personas. The ghost mutation problem — parent CRs not reflecting WTO-injected resources — blocks 7 GPUaaS requirements. The Model C architecture (WTO as resolution engine, component teams consume `resolvedSpec`) requires a pre-resolved spec in status.
+
+**Decision:** Split into two CRDs following the StorageClass → PVC / DeviceClass → ResourceClaim pattern:
+
+- **WorkloadProfileTemplate** (cluster-scoped): admin-created hardware blueprint — defaults, containers, deviceClaims. No placement.
+- **WorkloadProfile** (namespace-scoped): user/automation-created binding — references a template via `templateRef`, adds placement. Supports inline spec (no `templateRef`) for simple deployments.
+
+The profile controller resolves template + placement into `status.resolvedSpec`. The webhook reads `resolvedSpec` regardless of whether the profile uses a template or inline spec. Component teams (KServe, Notebook controller) read `resolvedSpec` to apply resources to their own CRs.
+
+No overrides in MVP. Templates are pure hardware definitions; bindings add only placement.
+
+**Consequences:**
+
+Admin curates a hardware menu (templates). Users consume it (bindings with placement). Dashboard lists templates filtered by `namespaceSelector`, creates bindings when users select a profile. `resolvedSpec` provides the single source of truth for both the webhook (pod injection) and component teams (CR-level injection).
+
+---
+
+## ADR-015: Placement is Binding-Only
+
+**Status:** Accepted
+
+**Context:** Placement (Node or Queue mode) could live in the template, the binding, or both. LocalQueues are namespace-scoped — a cluster-scoped template cannot know which LocalQueue a tenant uses. Different tenants using the same `gpu-t4` template have different ClusterQueues with different quotas, borrowing limits, and priorities. Node placement is also tenant-specific (zone affinity, node pools).
+
+**Decision:** Placement lives exclusively in the WorkloadProfile binding, never in the WorkloadProfileTemplate. Templates describe WHAT hardware a workload needs. Bindings describe WHERE it runs and WHOSE quota it draws from.
+
+**Consequences:**
+
+One template serves all tenants. No template proliferation for queue/zone variations. GitOps tenant onboarding (one YAML creates namespace + LocalQueue + WorkloadProfile) works naturally — placement is part of the tenant provisioning, not hardware definition. Dashboard shows templates as the "hardware menu" and creates bindings with the user's queue selection.
+
+---
+
+## ADR-016: namespaceSelector for Template Access Control
+
+**Status:** Accepted
+
+**Context:** With cluster-scoped templates visible to all namespaces, admins need a mechanism to restrict which tenants can use which templates. Four approaches were evaluated: RBAC on templates, Kueue-only enforcement, namespace allowlists, and `namespaceSelector` on templates.
+
+**Decision:** Templates carry an optional `namespaceSelector` (same type as `ClusterQueue.namespaceSelector`). The profile controller validates the binding namespace's labels against the template's selector. Nil selector means all namespaces are allowed.
+
+The dashboard reads `namespaceSelector` to filter templates client-side, showing only templates available to the current project. Kueue quota enforcement remains the backstop — even if a binding bypasses `namespaceSelector`, Kueue rejects workloads that exceed quota.
+
+**Consequences:**
+
+Admins control template access by labeling namespaces — the same labels they use for ClusterQueue.namespaceSelector. A future tenant onboarding operator that provisions namespace + labels + LocalQueue automatically determines which templates are available. Namespace is the smallest unit of access — no per-user granularity within a namespace.

@@ -17,11 +17,12 @@ import (
 )
 
 const (
-	ProfileAnnotation = "workload-tuning.io/profile-name"
-	SchedulingGate    = "workload-tuning.io/scheduling-gate"
-	GenerationAnno    = "workload-tuning.io/profile-generation"
-	AppliedAtAnno     = "workload-tuning.io/applied-at"
-	OverridesAnno     = "workload-tuning.io/overrides"
+	ProfileAnnotation    = "workload-tuning.io/profile-name"
+	SchedulingGate       = "workload-tuning.io/scheduling-gate"
+	GenerationAnno       = "workload-tuning.io/profile-generation"
+	TemplateGenAnno      = "workload-tuning.io/template-generation"
+	AppliedAtAnno        = "workload-tuning.io/applied-at"
+	OverridesAnno        = "workload-tuning.io/overrides"
 )
 
 type PodMutatingWebhook struct {
@@ -54,21 +55,29 @@ func (w *PodMutatingWebhook) Handle(ctx context.Context, req admission.Request) 
 			fmt.Errorf("WorkloadProfile %q not found in namespace %q: %w", profileName, req.Namespace, err))
 	}
 
-	if reason := w.checkBlockingConflicts(pod, profile); reason != "" {
+	resolved := profile.Status.ResolvedSpec
+	if resolved == nil {
+		msg := fmt.Sprintf("WorkloadProfile %q has not been reconciled yet — "+
+			"status.resolvedSpec is empty. Retry in a few seconds.", profileName)
+		log.Info("profile not reconciled, rejecting pod", "profile", profileName)
+		return admission.Denied(msg)
+	}
+
+	if reason := w.checkBlockingConflicts(pod, resolved); reason != "" {
 		log.Info("blocking conflict detected", "reason", reason)
 		return admission.Denied(fmt.Sprintf("WorkloadProfile %q conflict: %s", profileName, reason))
 	}
 
-	if len(profile.Spec.DeviceClaims) > 0 && !isConditionTrue(profile, wtov1alpha1.ConditionValid) {
+	if len(resolved.DeviceClaims) > 0 && !isConditionTrue(profile, wtov1alpha1.ConditionValid) {
 		msg := fmt.Sprintf("WorkloadProfile %q is not yet ready — the profile controller has not finished "+
 			"creating ResourceClaimTemplates. Retry in a few seconds.", profileName)
 		log.Info("profile not valid, rejecting pod", "profile", profileName)
 		return admission.Denied(msg)
 	}
 
-	overrides := w.injectResources(pod, &profile.Spec)
-	w.injectDRAClaims(pod, profile)
-	w.injectQueueLabel(pod, &profile.Spec)
+	overrides := w.injectResources(pod, resolved)
+	w.injectDRAClaims(pod, profile.Name, resolved)
+	w.injectQueueLabel(pod, resolved)
 	w.addSchedulingGate(pod)
 	w.setTrackingAnnotations(pod, profile, overrides)
 
@@ -131,18 +140,17 @@ func (w *PodMutatingWebhook) resolveResources(spec *wtov1alpha1.WorkloadProfileS
 	return nil
 }
 
-func (w *PodMutatingWebhook) injectDRAClaims(pod *corev1.Pod, profile *wtov1alpha1.WorkloadProfile) {
-	for _, claim := range profile.Spec.DeviceClaims {
-		templateName := fmt.Sprintf("wto-%s-%s", profile.Name, claim.Name)
+func (w *PodMutatingWebhook) injectDRAClaims(pod *corev1.Pod, profileName string, spec *wtov1alpha1.WorkloadProfileSpec) {
+	for _, claim := range spec.DeviceClaims {
+		templateName := fmt.Sprintf("wto-%s-%s", profileName, claim.Name)
 
 		pod.Spec.ResourceClaims = append(pod.Spec.ResourceClaims, corev1.PodResourceClaim{
 			Name:                      claim.Name,
 			ResourceClaimTemplateName: &templateName,
 		})
 
-		// Link to the first targeted container, or the first container if no targeting
 		targetIdx := 0
-		for _, c := range profile.Spec.Containers {
+		for _, c := range spec.Containers {
 			if c.Index != nil {
 				targetIdx = int(*c.Index)
 				break
@@ -191,23 +199,23 @@ func (w *PodMutatingWebhook) addSchedulingGate(pod *corev1.Pod) {
 	})
 }
 
-func (w *PodMutatingWebhook) checkBlockingConflicts(pod *corev1.Pod, profile *wtov1alpha1.WorkloadProfile) string {
-	if len(pod.Spec.ResourceClaims) > 0 && len(profile.Spec.DeviceClaims) > 0 {
+func (w *PodMutatingWebhook) checkBlockingConflicts(pod *corev1.Pod, spec *wtov1alpha1.WorkloadProfileSpec) string {
+	if len(pod.Spec.ResourceClaims) > 0 && len(spec.DeviceClaims) > 0 {
 		return "pod already has resourceClaims and profile has deviceClaims — dual device allocation risk. Remove existing resourceClaims or use a profile without deviceClaims."
 	}
 
-	if profile.Spec.Placement != nil && profile.Spec.Placement.Type == wtov1alpha1.PlacementTypeQueue {
+	if spec.Placement != nil && spec.Placement.Type == wtov1alpha1.PlacementTypeQueue {
 		if existing, ok := pod.Labels["kueue.x-k8s.io/queue-name"]; ok {
-			if profile.Spec.Placement.Queue != nil && existing != profile.Spec.Placement.Queue.LocalQueueName {
+			if spec.Placement.Queue != nil && existing != spec.Placement.Queue.LocalQueueName {
 				return fmt.Sprintf(
 					"pod has kueue.x-k8s.io/queue-name=%q but profile specifies queue %q — ambiguous queue assignment. Remove the label or use a matching profile.",
-					existing, profile.Spec.Placement.Queue.LocalQueueName)
+					existing, spec.Placement.Queue.LocalQueueName)
 			}
 		}
 	}
 
-	if profile.Spec.Placement != nil && profile.Spec.Placement.Type == wtov1alpha1.PlacementTypeNode && profile.Spec.Placement.Node != nil {
-		for k, profileV := range profile.Spec.Placement.Node.NodeSelector {
+	if spec.Placement != nil && spec.Placement.Type == wtov1alpha1.PlacementTypeNode && spec.Placement.Node != nil {
+		for k, profileV := range spec.Placement.Node.NodeSelector {
 			if podV, ok := pod.Spec.NodeSelector[k]; ok && podV != profileV {
 				return fmt.Sprintf(
 					"nodeSelector key %q: pod has %q but profile has %q — unsatisfiable constraint. Remove the pod's nodeSelector or use a compatible profile.",
@@ -233,6 +241,10 @@ func (w *PodMutatingWebhook) setTrackingAnnotations(pod *corev1.Pod, profile *wt
 		pod.Annotations = map[string]string{}
 	}
 	pod.Annotations[GenerationAnno] = fmt.Sprintf("%d", profile.Generation)
+
+	if profile.Status.TemplateGeneration != nil {
+		pod.Annotations[TemplateGenAnno] = fmt.Sprintf("%d", *profile.Status.TemplateGeneration)
+	}
 
 	if len(overrides) > 0 {
 		data, _ := json.Marshal(overrides)

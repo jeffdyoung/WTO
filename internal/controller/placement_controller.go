@@ -74,15 +74,20 @@ func (r *PlacementReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 
 	patch := client.MergeFrom(pod.DeepCopy())
 
-	if profile.Spec.Placement != nil {
-		switch profile.Spec.Placement.Type {
+	placement := profile.Spec.Placement
+	if profile.Status.ResolvedSpec != nil && profile.Status.ResolvedSpec.Placement != nil {
+		placement = profile.Status.ResolvedSpec.Placement
+	}
+
+	if placement != nil {
+		switch placement.Type {
 		case wtov1alpha1.PlacementTypeNode:
-			if profile.Spec.Placement.Node != nil {
-				r.applyNodePlacement(pod, profile.Spec.Placement.Node)
+			if placement.Node != nil {
+				r.applyNodePlacement(pod, placement.Node)
 			}
 		case wtov1alpha1.PlacementTypeQueue:
-			if profile.Spec.Placement.Queue != nil {
-				r.applyQueuePlacement(pod, profile.Spec.Placement.Queue)
+			if placement.Queue != nil {
+				r.applyQueuePlacement(pod, placement.Queue)
 			}
 		}
 	}
@@ -194,11 +199,15 @@ func (r *PlacementReconciler) checkResourceQuota(quota corev1.ResourceQuota, pro
 }
 
 func resolveProfileResources(profile *wtov1alpha1.WorkloadProfile) *corev1.ResourceRequirements {
-	if len(profile.Spec.Containers) > 0 {
-		return &profile.Spec.Containers[0].Resources
+	spec := &profile.Spec
+	if profile.Status.ResolvedSpec != nil {
+		spec = profile.Status.ResolvedSpec
 	}
-	if profile.Spec.Defaults != nil {
-		return &profile.Spec.Defaults.Resources
+	if len(spec.Containers) > 0 {
+		return &spec.Containers[0].Resources
+	}
+	if spec.Defaults != nil {
+		return &spec.Defaults.Resources
 	}
 	return nil
 }

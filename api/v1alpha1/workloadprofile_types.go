@@ -33,28 +33,50 @@ type WorkloadProfileList struct {
 }
 
 // WorkloadProfileSpec defines the desired hardware configuration for workloads.
+// A profile operates in one of two modes:
+//   - Template mode: set templateRef to reference a cluster-scoped WorkloadProfileTemplate.
+//     The template provides defaults, containers, and deviceClaims. Do not set those fields inline.
+//   - Inline mode: set defaults, containers, and/or deviceClaims directly. Do not set templateRef.
+//
+// Placement is always set on the profile (never on the template) because
+// LocalQueues and node affinities are tenant-scoped concerns.
+//
+// +kubebuilder:validation:XValidation:rule="has(self.templateRef) || has(self.defaults) || has(self.containers) || has(self.deviceClaims)",message="either templateRef or at least one of defaults/containers/deviceClaims must be set"
+// +kubebuilder:validation:XValidation:rule="!has(self.templateRef) || (!has(self.defaults) && !has(self.containers) && !has(self.deviceClaims))",message="defaults, containers, and deviceClaims must not be set when templateRef is used"
 type WorkloadProfileSpec struct {
+	// TemplateRef is the name of a cluster-scoped WorkloadProfileTemplate.
+	// When set, the profile controller resolves the template and writes
+	// the merged result (template hardware + profile placement) to
+	// status.resolvedSpec. Mutually exclusive with inline spec fields.
+	// +optional
+	TemplateRef *string `json:"templateRef,omitempty"`
+
 	// Defaults applied to any container not matched by a containers[] entry.
 	// If no containers[] entries exist and only defaults is set, every container
 	// in the pod receives these resources.
+	// Only valid in inline mode (templateRef not set).
 	// +optional
 	Defaults *ResourceDefaults `json:"defaults,omitempty"`
 
 	// Per-container resource overrides. Each entry targets a specific container
 	// by name or by index (position in the pod's container list).
 	// Name and index are mutually exclusive per entry.
+	// Only valid in inline mode (templateRef not set).
 	// +optional
 	Containers []ContainerResources `json:"containers,omitempty"`
 
 	// DRA device claims. Each entry maps to a ResourceClaimTemplate created by
 	// the Profile Controller. The webhook references these templates when
 	// injecting pod.spec.resourceClaims.
+	// Only valid in inline mode (templateRef not set).
 	// +optional
 	DeviceClaims []DeviceClaim `json:"deviceClaims,omitempty"`
 
 	// Placement determines where workloads run.
 	// Discriminated union: exactly one of node or queue must be set,
 	// matching the type field.
+	// Placement is always on the profile, never on the template, because
+	// LocalQueues and node affinities are namespace-scoped tenant concerns.
 	// +optional
 	Placement *PlacementConfig `json:"placement,omitempty"`
 }
@@ -147,9 +169,26 @@ type QueuePlacement struct {
 // WorkloadProfileStatus reports the profile's fitness against cluster state.
 type WorkloadProfileStatus struct {
 	// Standard Kubernetes conditions.
-	// Known types: Valid, DeviceClassAvailable, QueueReady, QuotaFit, DRAEnabled.
+	// Known types: Valid, TemplateFound, NamespaceAllowed, DeviceClassAvailable,
+	// QueueReady, QuotaFit, DRAEnabled, Drifted.
 	// +optional
 	Conditions []metav1.Condition `json:"conditions,omitempty"`
+
+	// ResolvedSpec is the fully-resolved spec after merging template hardware
+	// with profile placement. For inline profiles, this is a copy of the spec.
+	// This is the single source of truth for what WTO injects into pods.
+	// Component teams (KServe, Notebook controller) read this field.
+	// +optional
+	ResolvedSpec *WorkloadProfileSpec `json:"resolvedSpec,omitempty"`
+
+	// TemplateGeneration is the metadata.generation of the referenced
+	// WorkloadProfileTemplate at last resolution. Nil for inline profiles.
+	// +optional
+	TemplateGeneration *int64 `json:"templateGeneration,omitempty"`
+
+	// ResolvedGeneration is the profile's metadata.generation at last resolution.
+	// +optional
+	ResolvedGeneration *int64 `json:"resolvedGeneration,omitempty"`
 
 	// Number of nodes that can fulfill this profile's constraints.
 	// +optional
@@ -158,14 +197,39 @@ type WorkloadProfileStatus struct {
 	// Number of pods currently referencing this profile.
 	// +optional
 	AppliedWorkloads *int32 `json:"appliedWorkloads,omitempty"`
+
+	// Number of running pods with a stale profile-generation annotation.
+	// +optional
+	DriftedWorkloads *int32 `json:"driftedWorkloads,omitempty"`
+
+	// QuotaSummary reports pre-flight quota check results at the profile level.
+	// +optional
+	QuotaSummary *QuotaSummary `json:"quotaSummary,omitempty"`
+}
+
+// QuotaSummary reports the result of a pre-flight quota check.
+type QuotaSummary struct {
+	// Whether the profile's resource requirements fit within namespace quota.
+	Fit bool `json:"fit"`
+
+	// Human-readable description of the quota check result.
+	// +optional
+	Message string `json:"message,omitempty"`
+
+	// When the quota check was last performed.
+	// +optional
+	CheckedAt *metav1.Time `json:"checkedAt,omitempty"`
 }
 
 const (
-	ConditionValid              = "Valid"
+	ConditionValid                = "Valid"
+	ConditionTemplateFound        = "TemplateFound"
+	ConditionNamespaceAllowed     = "NamespaceAllowed"
 	ConditionDeviceClassAvailable = "DeviceClassAvailable"
-	ConditionQueueReady         = "QueueReady"
-	ConditionQuotaFit           = "QuotaFit"
-	ConditionDRAEnabled         = "DRAEnabled"
+	ConditionQueueReady           = "QueueReady"
+	ConditionQuotaFit             = "QuotaFit"
+	ConditionDRAEnabled           = "DRAEnabled"
+	ConditionDrifted              = "Drifted"
 )
 
 func init() {

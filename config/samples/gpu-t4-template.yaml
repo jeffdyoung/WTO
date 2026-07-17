@@ -1,0 +1,29 @@
+apiVersion: workload-tuning.io/v1alpha1
+kind: WorkloadProfileTemplate
+metadata:
+  name: gpu-t4
+  annotations:
+    workload-tuning.io/display-name: "Tesla T4 (1 GPU)"
+    workload-tuning.io/description: "1x NVIDIA Tesla T4 GPU with 1 CPU core and 4Gi memory"
+spec:
+  defaults:
+    resources:
+      requests:
+        cpu: "1"
+        memory: "4Gi"
+      limits:
+        cpu: "2"
+        memory: "8Gi"
+  deviceClaims:
+  - name: gpu
+    request:
+      name: gpu
+      exactly:
+        deviceClassName: gpu.nvidia.com
+        count: 1
+        selectors:
+        - cel:
+            expression: 'device.attributes["gpu.nvidia.com"].productName == "Tesla T4"'
+  namespaceSelector:
+    matchLabels:
+      gpu-tier: standard

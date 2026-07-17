@@ -246,6 +246,30 @@ func (b *ProfileBuilder) WithValidCondition(status metav1.ConditionStatus) *Prof
 	return b.WithCondition(wtov1alpha1.ConditionValid, status, "Test", "test condition")
 }
 
+func (b *ProfileBuilder) WithTemplateRef(templateName string) *ProfileBuilder {
+	b.profile.Spec.TemplateRef = &templateName
+	b.profile.Spec.Defaults = nil
+	b.profile.Spec.Containers = nil
+	b.profile.Spec.DeviceClaims = nil
+	return b
+}
+
+func (b *ProfileBuilder) WithResolvedSpec(spec *wtov1alpha1.WorkloadProfileSpec) *ProfileBuilder {
+	b.profile.Status.ResolvedSpec = spec
+	return b
+}
+
+func (b *ProfileBuilder) WithTemplateGeneration(gen int64) *ProfileBuilder {
+	b.profile.Status.TemplateGeneration = &gen
+	return b
+}
+
+func (b *ProfileBuilder) Resolve() *ProfileBuilder {
+	resolved := b.profile.Spec.DeepCopy()
+	b.profile.Status.ResolvedSpec = resolved
+	return b
+}
+
 func (b *ProfileBuilder) WithFinalizer() *ProfileBuilder {
 	b.profile.Finalizers = append(b.profile.Finalizers, "workload-tuning.io/profile-protection")
 	return b
@@ -259,6 +283,58 @@ func (b *ProfileBuilder) WithDeletionTimestamp() *ProfileBuilder {
 
 func (b *ProfileBuilder) Build() *wtov1alpha1.WorkloadProfile {
 	return b.profile.DeepCopy()
+}
+
+// --- Template Builder ---
+
+type TemplateBuilder struct {
+	template *wtov1alpha1.WorkloadProfileTemplate
+}
+
+func NewTemplate(name string) *TemplateBuilder {
+	return &TemplateBuilder{
+		template: &wtov1alpha1.WorkloadProfileTemplate{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:       name,
+				Generation: 1,
+			},
+		},
+	}
+}
+
+func (b *TemplateBuilder) WithDefaults(requests, limits corev1.ResourceList) *TemplateBuilder {
+	b.template.Spec.Defaults = &wtov1alpha1.ResourceDefaults{
+		Resources: corev1.ResourceRequirements{
+			Requests: requests,
+			Limits:   limits,
+		},
+	}
+	return b
+}
+
+func (b *TemplateBuilder) WithDeviceClaim(claimName, deviceClassName string, count int64) *TemplateBuilder {
+	b.template.Spec.DeviceClaims = append(b.template.Spec.DeviceClaims, wtov1alpha1.DeviceClaim{
+		Name: claimName,
+		Request: resourcev1.DeviceRequest{
+			Name: claimName,
+			Exactly: &resourcev1.ExactDeviceRequest{
+				DeviceClassName: deviceClassName,
+				Count:           count,
+			},
+		},
+	})
+	return b
+}
+
+func (b *TemplateBuilder) WithNamespaceSelector(matchLabels map[string]string) *TemplateBuilder {
+	b.template.Spec.NamespaceSelector = &metav1.LabelSelector{
+		MatchLabels: matchLabels,
+	}
+	return b
+}
+
+func (b *TemplateBuilder) Build() *wtov1alpha1.WorkloadProfileTemplate {
+	return b.template.DeepCopy()
 }
 
 // --- Admission Request Helper ---

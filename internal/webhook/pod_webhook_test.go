@@ -36,10 +36,20 @@ func TestHandle(t *testing.T) {
 			wantMsg:   "not found",
 		},
 		{
+			name: "resolvedSpec nil denied",
+			pod:  tu.NewPod("test", "default").WithProfileAnnotation("empty").Build(),
+			profile: tu.NewProfile("empty", "default").
+				WithDefaults(tu.ResourceList("100m", "128Mi"), tu.ResourceList("100m", "128Mi")).
+				Build(),
+			wantAllow: false,
+			wantMsg:   "not been reconciled",
+		},
+		{
 			name: "deviceClaims with Valid!=True denied (C-2)",
 			pod:  tu.NewPod("test", "default").WithProfileAnnotation("gpu").Build(),
 			profile: tu.NewProfile("gpu", "default").
 				WithDeviceClaim("gpu", "gpu.nvidia.com", 1).
+				Resolve().
 				Build(),
 			wantAllow: false,
 			wantMsg:   "not yet ready",
@@ -49,6 +59,7 @@ func TestHandle(t *testing.T) {
 			pod:  tu.NewPod("test", "default").WithProfileAnnotation("gpu").Build(),
 			profile: tu.NewProfile("gpu", "default").
 				WithDeviceClaim("gpu", "gpu.nvidia.com", 1).
+				Resolve().
 				WithValidCondition(metav1.ConditionTrue).
 				Build(),
 			wantAllow: true,
@@ -58,6 +69,7 @@ func TestHandle(t *testing.T) {
 			pod:  tu.NewPod("test", "default").WithProfileAnnotation("cpu-only").Build(),
 			profile: tu.NewProfile("cpu-only", "default").
 				WithDefaults(tu.ResourceList("100m", "128Mi"), tu.ResourceList("100m", "128Mi")).
+				Resolve().
 				Build(),
 			wantAllow: true,
 		},
@@ -69,6 +81,7 @@ func TestHandle(t *testing.T) {
 				Build(),
 			profile: tu.NewProfile("gpu", "default").
 				WithDeviceClaim("gpu", "gpu.nvidia.com", 1).
+				Resolve().
 				WithValidCondition(metav1.ConditionTrue).
 				Build(),
 			wantAllow: false,
@@ -82,6 +95,7 @@ func TestHandle(t *testing.T) {
 				Build(),
 			profile: tu.NewProfile("queued", "default").
 				WithQueuePlacement("queue-b", nil).
+				Resolve().
 				Build(),
 			wantAllow: false,
 			wantMsg:   "ambiguous queue",
@@ -94,6 +108,7 @@ func TestHandle(t *testing.T) {
 				Build(),
 			profile: tu.NewProfile("node", "default").
 				WithNodePlacement(map[string]string{"gpu": "true"}, nil).
+				Resolve().
 				Build(),
 			wantAllow: false,
 			wantMsg:   "unsatisfiable",
@@ -106,6 +121,7 @@ func TestHandle(t *testing.T) {
 				Build(),
 			profile: tu.NewProfile("cpu", "default").
 				WithDefaults(tu.ResourceList("100m", "128Mi"), tu.ResourceList("200m", "256Mi")).
+				Resolve().
 				Build(),
 			wantAllow: true,
 		},
@@ -118,6 +134,7 @@ func TestHandle(t *testing.T) {
 			profile: tu.NewProfile("targeted", "default").
 				WithContainer(tu.StringPtr("main"), nil,
 					tu.ResourceList("500m", "1Gi"), tu.ResourceList("1", "2Gi")).
+				Resolve().
 				Build(),
 			wantAllow: true,
 		},
@@ -125,15 +142,15 @@ func TestHandle(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			var objs []interface{}
-			if tt.profile != nil {
-				objs = append(objs, tt.profile)
-			}
-
 			fakeClient := tu.NewFakeClient()
 			if tt.profile != nil {
 				if err := fakeClient.Create(ctx, tt.profile); err != nil {
 					t.Fatalf("failed to seed profile: %v", err)
+				}
+				if tt.profile.Status.ResolvedSpec != nil || len(tt.profile.Status.Conditions) > 0 {
+					if err := fakeClient.Status().Update(ctx, tt.profile); err != nil {
+						t.Fatalf("failed to seed profile status: %v", err)
+					}
 				}
 			}
 
@@ -292,9 +309,9 @@ func TestInjectDRAClaims(t *testing.T) {
 
 	t.Run("single claim with correct template name", func(t *testing.T) {
 		pod := tu.NewPod("p", "ns").Build()
-		profile := tu.NewProfile("gpu-t4", "ns").
-			WithDeviceClaim("gpu", "gpu.nvidia.com", 1).Build()
-		wh.injectDRAClaims(pod, profile)
+		spec := tu.NewProfile("gpu-t4", "ns").
+			WithDeviceClaim("gpu", "gpu.nvidia.com", 1).Build().Spec.DeepCopy()
+		wh.injectDRAClaims(pod, "gpu-t4", spec)
 
 		if len(pod.Spec.ResourceClaims) != 1 {
 			t.Fatalf("expected 1 resource claim, got %d", len(pod.Spec.ResourceClaims))
@@ -311,9 +328,9 @@ func TestInjectDRAClaims(t *testing.T) {
 
 	t.Run("claim linked to container 0 by default", func(t *testing.T) {
 		pod := tu.NewPod("p", "ns").Build()
-		profile := tu.NewProfile("gpu-t4", "ns").
-			WithDeviceClaim("gpu", "gpu.nvidia.com", 1).Build()
-		wh.injectDRAClaims(pod, profile)
+		spec := tu.NewProfile("gpu-t4", "ns").
+			WithDeviceClaim("gpu", "gpu.nvidia.com", 1).Build().Spec.DeepCopy()
+		wh.injectDRAClaims(pod, "gpu-t4", spec)
 
 		if len(pod.Spec.Containers[0].Resources.Claims) != 1 {
 			t.Fatalf("expected 1 claim ref on container 0, got %d", len(pod.Spec.Containers[0].Resources.Claims))
