@@ -78,7 +78,7 @@ func (b *PodBuilder) WithProfileAnnotation(profileName string) *PodBuilder {
 	if b.pod.Annotations == nil {
 		b.pod.Annotations = map[string]string{}
 	}
-	b.pod.Annotations["workload-tuning.io/profile-name"] = profileName
+	b.pod.Annotations["workload-template.io/profile-name"] = profileName
 	return b
 }
 
@@ -100,7 +100,7 @@ func (b *PodBuilder) WithLabel(key, value string) *PodBuilder {
 
 func (b *PodBuilder) WithWTOGate() *PodBuilder {
 	b.pod.Spec.SchedulingGates = append(b.pod.Spec.SchedulingGates, corev1.PodSchedulingGate{
-		Name: "workload-tuning.io/scheduling-gate",
+		Name: "workload-template.io/scheduling-gate",
 	})
 	return b
 }
@@ -271,7 +271,7 @@ func (b *ProfileBuilder) Resolve() *ProfileBuilder {
 }
 
 func (b *ProfileBuilder) WithFinalizer() *ProfileBuilder {
-	b.profile.Finalizers = append(b.profile.Finalizers, "workload-tuning.io/profile-protection")
+	b.profile.Finalizers = append(b.profile.Finalizers, "workload-template.io/profile-protection")
 	return b
 }
 

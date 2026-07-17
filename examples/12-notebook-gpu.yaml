@@ -21,14 +21,14 @@ metadata:
   annotations:
     notebooks.opendatahub.io/inject-oauth: "false"
     opendatahub.io/image-display-name: "Minimal GPU"
-    workload-tuning.io/profile-name: gpu-t4-node
+    workload-template.io/profile-name: gpu-t4-node
   labels:
     opendatahub.io/dashboard: "true"
 spec:
   template:
     metadata:
       annotations:
-        workload-tuning.io/profile-name: gpu-t4-node
+        workload-template.io/profile-name: gpu-t4-node
     spec:
       containers:
         - name: gpu-notebook

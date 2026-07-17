@@ -35,7 +35,7 @@ metadata:
   namespace: wto-examples
   annotations:
     serving.kserve.io/deploymentMode: RawDeployment
-    workload-tuning.io/profile-name: gpu-t4-kserve
+    workload-template.io/profile-name: gpu-t4-kserve
 spec:
   predictor:
     model:

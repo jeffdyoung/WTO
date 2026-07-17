@@ -1,10 +1,10 @@
-apiVersion: workload-tuning.io/v1alpha1
+apiVersion: workload-template.io/v1alpha1
 kind: WorkloadProfileTemplate
 metadata:
   name: gpu-t4
   annotations:
-    workload-tuning.io/display-name: "Tesla T4 (1 GPU)"
-    workload-tuning.io/description: "1x NVIDIA Tesla T4 GPU with 1 CPU core and 4Gi memory"
+    workload-template.io/display-name: "Tesla T4 (1 GPU)"
+    workload-template.io/description: "1x NVIDIA Tesla T4 GPU with 1 CPU core and 4Gi memory"
 spec:
   defaults:
     resources:

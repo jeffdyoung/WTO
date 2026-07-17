@@ -8,7 +8,7 @@ metadata:
   name: gpu-test-pod
   namespace: wto-examples
   annotations:
-    workload-tuning.io/profile-name: gpu-t4-node
+    workload-template.io/profile-name: gpu-t4-node
 spec:
   containers:
     - name: gpu-test

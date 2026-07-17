@@ -1,5 +1,5 @@
 // +kubebuilder:object:generate=true
-// +groupName=workload-tuning.io
+// +groupName=workload-template.io
 package v1alpha1
 
 import (
@@ -8,7 +8,7 @@ import (
 )
 
 var (
-	GroupVersion = schema.GroupVersion{Group: "workload-tuning.io", Version: "v1alpha1"}
+	GroupVersion = schema.GroupVersion{Group: "workload-template.io", Version: "v1alpha1"}
 	SchemeBuilder = &scheme.Builder{GroupVersion: GroupVersion}
 	AddToScheme = SchemeBuilder.AddToScheme
 )

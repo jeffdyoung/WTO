@@ -39,7 +39,7 @@ ADR-009 explicitly states the mitigation (multiple replicas, anti-affinity, live
 **Reproduced:** 2026-07-02 on OCP 4.21. Created profile + quota-blocked pod, deleted profile while pod was gated. Controller logged `ProfileError: "gpu-delete-test" not found` every 10s indefinitely. Pod required manual force-deletion.
 
 **Fix (implemented, validated 2026-07-06 on OCP 4.21):** Two complementary approaches:
-1. **Finalizer on WorkloadProfile** (`workload-tuning.io/profile-protection`): ProfileReconciler adds a finalizer on reconciliation. On deletion, the finalizer blocks removal while gated pods reference the profile, emitting a `DeletionBlocked` event listing the blocking pod names. Once all gated pods are gone, the finalizer is removed and deletion proceeds.
+1. **Finalizer on WorkloadProfile** (`workload-template.io/profile-protection`): ProfileReconciler adds a finalizer on reconciliation. On deletion, the finalizer blocks removal while gated pods reference the profile, emitting a `DeletionBlocked` event listing the blocking pod names. Once all gated pods are gone, the finalizer is removed and deletion proceeds.
 2. **Ungate-on-NotFound in PlacementReconciler**: When the profile is NotFound, the controller ungates the pod with a `ProfileDeleted` warning event instead of retrying forever. Resources and DRA claims set at creation time remain intact — the pod proceeds without placement configuration.
 
 ---
@@ -96,7 +96,7 @@ The pod has a resource configuration from profile generation N but a queue assig
 
 **Impact:** Silent consistency violation — pod has mixed-generation configuration with no detection or warning.
 
-**Fix:** The controller should compare the profile's current generation against the pod's `workload-tuning.io/profile-generation` annotation. If they differ, emit a warning event but use the generation that was captured at CREATE time (from the annotation). The queue label should not be overwritten if it was already set by the webhook.
+**Fix:** The controller should compare the profile's current generation against the pod's `workload-template.io/profile-generation` annotation. If they differ, emit a warning event but use the generation that was captured at CREATE time (from the annotation). The queue label should not be overwritten if it was already set by the webhook.
 
 ---
 
@@ -217,7 +217,7 @@ The documents describe `QuotaFit` condition, `quotaSummary` status field, and co
 
 **Location:** `internal/webhook/pod_webhook.go` (line 23)
 
-The constant `AppliedAtAnno = "workload-tuning.io/applied-at"` is defined but `setTrackingAnnotations` never sets it. The README lists it as a tracking annotation.
+The constant `AppliedAtAnno = "workload-template.io/applied-at"` is defined but `setTrackingAnnotations` never sets it. The README lists it as a tracking annotation.
 
 ---
 
@@ -231,4 +231,4 @@ The ADR states alphabetical ordering is part of the K8s API contract, which is c
 
 ### L-4: Self-mutation risk if wto-system is labeled for WTO
 
-If `wto-system` has `workload-tuning.io/enabled: "true"`, any WTO pod restart would be intercepted by its own webhook. Without the profile annotation it's a no-op, but if the namespace is labeled carelessly and any pod has the annotation, WTO must be running for WTO to start — a circular dependency. The webhook's `namespaceSelector` should explicitly exclude `wto-system`.
+If `wto-system` has `workload-template.io/enabled: "true"`, any WTO pod restart would be intercepted by its own webhook. Without the profile annotation it's a no-op, but if the namespace is labeled carelessly and any pod has the annotation, WTO must be running for WTO to start — a circular dependency. The webhook's `namespaceSelector` should explicitly exclude `wto-system`.

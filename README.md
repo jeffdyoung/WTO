@@ -1,6 +1,6 @@
-# Workload Tuning Operator
+# Workload Template Operator
 
-The Workload Tuning Operator (WTO) ensures Kubernetes workloads land on the right hardware with the right resources. It is a single operator for workload-to-hardware placement: CPU architecture scheduling, GPU/accelerator allocation via Dynamic Resource Allocation (DRA), resource injection, and queue-based scheduling integration with Kueue.
+The Workload Template Operator (WTO) ensures Kubernetes workloads land on the right hardware with the right resources. It is a single operator for workload-to-hardware placement: CPU architecture scheduling, GPU/accelerator allocation via Dynamic Resource Allocation (DRA), resource injection, and queue-based scheduling integration with Kueue.
 
 WTO replaces scattered, webhook-only placement logic with a unified, controller-driven model. It gates pods at admission, validates constraints against live cluster state, injects resources and DRA claims, and only releases the pod for scheduling once everything is correct. The result: workloads fail fast with actionable feedback instead of sitting Pending with cryptic events.
 
@@ -31,7 +31,7 @@ A namespaced Custom Resource that declares what hardware a workload needs and wh
 
 #### UI Metadata
 
-- Display name, description, visibility, and disabled state live exclusively in annotations (`workload-tuning.io/display-name`, `workload-tuning.io/description`, etc.).
+- Display name, description, visibility, and disabled state live exclusively in annotations (`workload-template.io/display-name`, `workload-template.io/description`, etc.).
 - The spec contains only functional fields. Dashboards and UIs read annotations for rendering.
 
 #### Status
@@ -52,15 +52,15 @@ Profiles that are structurally impossible (DeviceClass doesn't exist, zero satis
 
 A `MutatingAdmissionWebhook` with `failurePolicy: Fail` that intercepts pod creation. The webhook handles all pod spec fields that are **immutable after creation** — resource requirements, DRA claim references, and the scheduling gate — because Kubernetes does not allow these fields to be modified on existing pods, even gated ones.
 
-If the pod carries a `workload-tuning.io/profile-name` annotation, the webhook:
+If the pod carries a `workload-template.io/profile-name` annotation, the webhook:
 
 1. **Reads the WorkloadProfile** referenced by the annotation (from informer cache).
 2. **Injects `corev1.ResourceRequirements`** into targeted containers (by name, index, or defaults).
 3. **Injects DRA claim references** if the profile has `deviceClaims`:
    - Adds `pod.spec.resourceClaims[]` entries referencing pre-created ResourceClaimTemplates (managed by the Profile Controller).
    - Adds `container.resources.claims[]` references linking targeted containers to their device claims.
-4. **Adds a scheduling gate** (`workload-tuning.io/scheduling-gate`) to hold the pod for controller-side validation.
-5. **Sets tracking annotations**: `workload-tuning.io/profile-generation`, `workload-tuning.io/applied-at`.
+4. **Adds a scheduling gate** (`workload-template.io/scheduling-gate`) to hold the pod for controller-side validation.
+5. **Sets tracking annotations**: `workload-template.io/profile-generation`, `workload-template.io/applied-at`.
 
 If the pod has no profile annotation, the webhook is a no-op.
 
@@ -215,12 +215,12 @@ WTO's core design (CRD, webhook, controllers, scheduling gate pattern) is Kubern
 WTO's MutatingWebhookConfiguration is named `aaa-wto` to ensure it fires before Kueue's `kueue-mutating-webhook-configuration`. This is required for Queue placement: WTO injects the `kueue.x-k8s.io/queue-name` label at pod CREATE time, and Kueue's webhook must see this label to add its own scheduling gate. See ADR-013 for details.
 
 Namespaces using Queue placement need both labels:
-- `workload-tuning.io/enabled: "true"` (WTO webhook)
+- `workload-template.io/enabled: "true"` (WTO webhook)
 - `kueue.openshift.io/managed: "true"` (Kueue webhook)
 
 ### Workload Annotation Placement
 
-WTO mutates pods, not workload CRs (see ADR-001). The `workload-tuning.io/profile-name` annotation must be present on the **pod** at creation time. Since users create workload CRs (not pods directly), the annotation must be placed where the workload controller will propagate it to the pod template.
+WTO mutates pods, not workload CRs (see ADR-001). The `workload-template.io/profile-name` annotation must be present on the **pod** at creation time. Since users create workload CRs (not pods directly), the annotation must be placed where the workload controller will propagate it to the pod template.
 
 This is not a design failure — it is a deliberate trade-off for universality and GitOps compatibility. But it is an adoption tax: platform teams must know the correct annotation path for each workload type.
 

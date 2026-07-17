@@ -4,9 +4,9 @@ kind: CustomResourceDefinition
 metadata:
   annotations:
     controller-gen.kubebuilder.io/version: v0.19.0
-  name: workloadprofiles.workload-tuning.io
+  name: workloadprofiles.workload-template.io
 spec:
-  group: workload-tuning.io
+  group: workload-template.io
   names:
     kind: WorkloadProfile
     listKind: WorkloadProfileList

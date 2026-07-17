@@ -73,13 +73,13 @@ On Kubernetes 1.34+, `pod.spec.resourceClaims` and `container.resources` are imm
 
 ### Dashboard integration is simpler
 
-With pod-level injection, the Dashboard writes one annotation (`workload-tuning.io/profile-name`) and reads WorkloadProfile status conditions (`Valid`, `DeviceClassAvailable`, `satisfiableNodes`). All injection logic is WTO's responsibility. The Dashboard does not need to understand resource injection semantics, per-type container paths, or scheduling configuration.
+With pod-level injection, the Dashboard writes one annotation (`workload-template.io/profile-name`) and reads WorkloadProfile status conditions (`Valid`, `DeviceClassAvailable`, `satisfiableNodes`). All injection logic is WTO's responsibility. The Dashboard does not need to understand resource injection semantics, per-type container paths, or scheduling configuration.
 
 **Consequences:**
 
-The pod's owning workload CR does not reflect injected resources in its pod template. WTO compensates by writing observability annotations on the owning workload (`workload-tuning.io/applied-summary`, `workload-tuning.io/applied-generation`) via the owner reference chain. These annotations are informational — they do not trigger reconciliation by the owning controller.
+The pod's owning workload CR does not reflect injected resources in its pod template. WTO compensates by writing observability annotations on the owning workload (`workload-template.io/applied-summary`, `workload-template.io/applied-generation`) via the owner reference chain. These annotations are informational — they do not trigger reconciliation by the owning controller.
 
-The `workload-tuning.io/profile-name` annotation must be present on the pod at creation time. The user (or their tooling) is responsible for placing this annotation where the workload controller will propagate it to the pod template. For Deployments and Jobs, this is `spec.template.metadata.annotations`. For Notebooks, the annotation should be on both the Notebook CR metadata and `spec.template.metadata.annotations` — the notebook controller propagates CR-level annotations to the StatefulSet pod template.
+The `workload-template.io/profile-name` annotation must be present on the pod at creation time. The user (or their tooling) is responsible for placing this annotation where the workload controller will propagate it to the pod template. For Deployments and Jobs, this is `spec.template.metadata.annotations`. For Notebooks, the annotation should be on both the Notebook CR metadata and `spec.template.metadata.annotations` — the notebook controller propagates CR-level annotations to the StatefulSet pod template.
 
 **Alternatives considered:**
 
@@ -159,7 +159,7 @@ Profile changes do not propagate to pods that have already been created. Resourc
 - `pod.spec.resourceClaims` (DRA ResourceClaimTemplate references)
 - `kueue.x-k8s.io/queue-name` label (Queue placement mode)
 
-When the workload specifies a value for an owned field and the profile specifies a different value, the profile wins. WTO emits a Warning event on the pod listing the overridden fields and sets the annotation `workload-tuning.io/overrides` with the list of overridden field paths.
+When the workload specifies a value for an owned field and the profile specifies a different value, the profile wins. WTO emits a Warning event on the pod listing the overridden fields and sets the annotation `workload-template.io/overrides` with the list of overridden field paths.
 
 **Merged fields — additive, never removes:**
 - `pod.spec.tolerations` — profile tolerations are appended alongside existing tolerations
@@ -373,7 +373,7 @@ If the webhook is unavailable, pod creation is blocked rather than allowing pods
 
 WTO webhook availability is on the critical path for pod creation. WTO must be highly available: multiple replicas with anti-affinity, liveness/readiness probes, and `system-cluster-critical` priority class.
 
-WTO must not intercept pods it does not manage. The webhook uses an object selector (or namespace selector) to match only pods with the `workload-tuning.io/profile-name` annotation. Pods without the annotation bypass the webhook entirely — WTO downtime does not affect unrelated workloads.
+WTO must not intercept pods it does not manage. The webhook uses an object selector (or namespace selector) to match only pods with the `workload-template.io/profile-name` annotation. Pods without the annotation bypass the webhook entirely — WTO downtime does not affect unrelated workloads.
 
 **Alternatives considered:**
 
@@ -394,7 +394,7 @@ WTO must not intercept pods it does not manage. The webhook uses an object selec
 
 When a WorkloadProfile is updated:
 1. Profile Controller re-validates and updates status.
-2. Profile Controller identifies pods referencing the profile whose `workload-tuning.io/profile-generation` annotation is stale.
+2. Profile Controller identifies pods referencing the profile whose `workload-template.io/profile-generation` annotation is stale.
 3. Profile Controller sets a `Drifted` condition on stale pods and emits an event.
 4. Profile Controller annotates the owning workload (Notebook, Deployment) with drift status.
 5. On the next pod creation for that workload, the new pod picks up the updated profile.
@@ -425,10 +425,10 @@ Running workloads can be in a drifted state for the lifetime of their current po
 
 | Annotation | Purpose |
 |---|---|
-| `workload-tuning.io/display-name` | Human-readable name shown in UIs |
-| `workload-tuning.io/description` | Profile description |
-| `workload-tuning.io/disabled` | `"true"` to hide from selection UIs |
-| `workload-tuning.io/dashboard-feature-visibility` | Feature-gate visibility for dashboard rendering |
+| `workload-template.io/display-name` | Human-readable name shown in UIs |
+| `workload-template.io/description` | Profile description |
+| `workload-template.io/disabled` | `"true"` to hide from selection UIs |
+| `workload-template.io/dashboard-feature-visibility` | Feature-gate visibility for dashboard rendering |
 
 The WorkloadProfile spec contains only functional fields — fields that affect pod mutation.
 
@@ -436,7 +436,7 @@ The WorkloadProfile spec contains only functional fields — fields that affect 
 
 The CRD schema is decoupled from UI concerns. Adding a new dashboard feature flag does not require a CRD version bump. Different UIs can use different annotation conventions without schema changes.
 
-UI metadata has no schema validation. A typo in `workload-tuning.io/display-name` is not caught by the API server. This is acceptable because UI metadata has no functional impact — a misspelled display name does not affect workload placement.
+UI metadata has no schema validation. A typo in `workload-template.io/display-name` is not caught by the API server. This is acceptable because UI metadata has no functional impact — a misspelled display name does not affect workload placement.
 
 **Alternatives considered:**
 
@@ -494,7 +494,7 @@ Kubernetes invokes MutatingWebhookConfigurations in alphabetical order by name. 
 
 The name `aaa-wto` is unconventional but explicit about its purpose. The ordering guarantee is stable — Kubernetes alphabetical ordering of MutatingWebhookConfigurations is part of the API contract.
 
-Namespaces using Queue placement must have both labels: `workload-tuning.io/enabled: "true"` (for WTO's webhook) and `kueue.openshift.io/managed: "true"` (for Kueue's webhook).
+Namespaces using Queue placement must have both labels: `workload-template.io/enabled: "true"` (for WTO's webhook) and `kueue.openshift.io/managed: "true"` (for Kueue's webhook).
 
 **⚠ Fragility Warning:**
 

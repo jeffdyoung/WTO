@@ -7,11 +7,11 @@ End-to-end examples validated on OCP 4.21 / K8s 1.34 with 2x Tesla T4 GPUs, Kueu
 Before running these examples, ensure:
 
 1. WTO is deployed (`make deploy` from the WTO root)
-2. The target namespace has the label `workload-tuning.io/enabled: "true"`
+2. The target namespace has the label `workload-template.io/enabled: "true"`
 3. For Queue placement examples, the namespace also needs `kueue.openshift.io/managed: "true"`
 
 ```bash
-oc label ns my-namespace workload-tuning.io/enabled=true
+oc label ns my-namespace workload-template.io/enabled=true
 oc label ns my-namespace kueue.openshift.io/managed=true  # only for Queue placement
 ```
 

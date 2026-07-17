@@ -17,12 +17,12 @@ import (
 )
 
 const (
-	ProfileAnnotation    = "workload-tuning.io/profile-name"
-	SchedulingGate       = "workload-tuning.io/scheduling-gate"
-	GenerationAnno       = "workload-tuning.io/profile-generation"
-	TemplateGenAnno      = "workload-tuning.io/template-generation"
-	AppliedAtAnno        = "workload-tuning.io/applied-at"
-	OverridesAnno        = "workload-tuning.io/overrides"
+	ProfileAnnotation    = "workload-template.io/profile-name"
+	SchedulingGate       = "workload-template.io/scheduling-gate"
+	GenerationAnno       = "workload-template.io/profile-generation"
+	TemplateGenAnno      = "workload-template.io/template-generation"
+	AppliedAtAnno        = "workload-template.io/applied-at"
+	OverridesAnno        = "workload-template.io/overrides"
 )
 
 type PodMutatingWebhook struct {

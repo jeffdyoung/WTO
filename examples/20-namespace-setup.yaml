@@ -11,7 +11,7 @@ kind: Namespace
 metadata:
   name: wto-examples
   labels:
-    workload-tuning.io/enabled: "true"
+    workload-template.io/enabled: "true"
     gpu-tier: standard
     kueue.openshift.io/managed: "true"
     pod-security.kubernetes.io/audit: privileged

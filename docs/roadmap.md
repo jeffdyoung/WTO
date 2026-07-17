@@ -10,7 +10,7 @@ This document tracks the path from design to production-ready MVP.
 
 **Goal:** Buildable, deployable operator skeleton with CRD installed on a cluster.
 
-- [x] Scaffold operator (`workload-tuning.io` API group, `github.com/jeffdyoung/wto` module)
+- [x] Scaffold operator (`workload-template.io` API group, `github.com/jeffdyoung/wto` module)
 - [x] Define `WorkloadProfile` types in `api/v1alpha1/`
   - `WorkloadProfileSpec`: `defaults`, `containers[]`, `deviceClaims[]`, `placement`
   - `WorkloadProfileStatus`: conditions, `satisfiableNodes`, `appliedWorkloads`
@@ -34,6 +34,7 @@ This document tracks the path from design to production-ready MVP.
 - [x] Injects `container.resources.claims[]` linking containers to claims
 - [x] Adds scheduling gate
 - [x] Sets tracking annotations (`profile-generation`, `overrides`)
+- [ ] **Inject profile name as a pod label** (not just annotation) for cost attribution. Cost Management and other metrics platforms (OpenCost, Kubecost, Thanos) only read pod labels — annotations are invisible to tag-based cost filtering. The webhook must set `workload-template.io/profile-name` as both a label and an annotation. Without this, GPU cost cannot be grouped by workload profile.
 - [x] TLS via OpenShift service-ca (no cert-manager needed)
 - [x] Container targeting: by name, by index, defaults fallback
 
@@ -99,7 +100,7 @@ This document tracks the path from design to production-ready MVP.
   - Pod has `kueue.x-k8s.io/queue-name` label pointing to different queue than profile
   - Pod has nodeSelector key contradicting profile's nodeSelector
 - [x] **Overrides** (allowed with warning):
-  - Container already has resources for a key the profile specifies → overridden, recorded in `workload-tuning.io/overrides` annotation
+  - Container already has resources for a key the profile specifies → overridden, recorded in `workload-template.io/overrides` annotation
 - [x] Integration test: conflict pod rejected with clear message
 
 **Not done:**
@@ -168,6 +169,7 @@ This document tracks the path from design to production-ready MVP.
 - [ ] Multiple replicas, anti-affinity, leader election, `system-cluster-critical`
 - [ ] Prometheus metrics (`wto_pods_gated`, `wto_gate_duration_seconds`, etc.)
 - [ ] ServiceMonitor + PrometheusRule for OpenShift monitoring
+- [ ] Cost attribution labels: ensure all pods injected by WTO carry labels consumable by cost platforms (Cost Management, OpenCost, Thanos). At minimum: `workload-template.io/profile-name`, `kueue.x-k8s.io/queue-name` (already done), and `opendatahub.io/workload-type` if workload type is known
 - [ ] Benchmark: gate-to-ungate < 2s p95 (resource-only), < 5s p95 (DRA)
 - [ ] NetworkPolicy, Pod Security Standards compliance
 

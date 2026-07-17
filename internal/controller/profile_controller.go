@@ -24,7 +24,7 @@ import (
 )
 
 const (
-	profileFinalizer = "workload-tuning.io/profile-protection"
+	profileFinalizer = "workload-template.io/profile-protection"
 	templateRefIndex = ".spec.templateRef"
 )
 

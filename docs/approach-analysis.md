@@ -458,7 +458,7 @@ The pod-level approach can partially compensate for the observability gap by:
 
 However, these mitigations add complexity and are not standard Kubernetes patterns.
 
-**WTO status:** WTO implements the first mitigation — the webhook injects `workload-tuning.io/profile-generation` and `workload-tuning.io/overrides` annotations on mutated pods. The profile status CRD reports `appliedWorkloads` count and `satisfiableNodes`. A kubectl plugin is not implemented (deferred to post-MVP).
+**WTO status:** WTO implements the first mitigation — the webhook injects `workload-template.io/profile-generation` and `workload-template.io/overrides` annotations on mutated pods. The profile status CRD reports `appliedWorkloads` count and `satisfiableNodes`. A kubectl plugin is not implemented (deferred to post-MVP).
 
 ### The hybrid approach deserves serious consideration
 
@@ -469,7 +469,7 @@ A hybrid architecture could combine:
 
 This would require the pod webhook to detect the owning CR (via ownerReferences chain), which adds complexity but is feasible.
 
-**WTO status:** WTO already implements the first half of this hybrid — the pod webhook handles resource/DRA injection and the placement controller handles mutable fields (ADR-002). The CR-level observability side is partially designed (ADR-010 describes drift detection and owning-workload annotations like `workload-tuning.io/applied-summary`) but not yet implemented. The ownerReferences chain walk is not implemented.
+**WTO status:** WTO already implements the first half of this hybrid — the pod webhook handles resource/DRA injection and the placement controller handles mutable fields (ADR-002). The CR-level observability side is partially designed (ADR-010 describes drift detection and owning-workload annotations like `workload-template.io/applied-summary`) but not yet implemented. The ownerReferences chain walk is not implemented.
 
 ### Kueue's admission-gated-by annotation favors the Job level
 
