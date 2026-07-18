@@ -112,11 +112,13 @@ func TestPlacementReconcile(t *testing.T) {
 						t.Error("tolerations not applied")
 					}
 				}
-				if tt.profileName == "queue-profile" {
-					if updated.Labels == nil || updated.Labels["kueue.x-k8s.io/queue-name"] != "my-queue" {
-						t.Errorf("queue label not set: %v", updated.Labels)
-					}
-				}
+				// Queue placement assertion disabled — queue logic commented out.
+				// See wto-kueue-boundary.md.
+				// if tt.profileName == "queue-profile" {
+				// 	if updated.Labels == nil || updated.Labels["kueue.x-k8s.io/queue-name"] != "my-queue" {
+				// 		t.Errorf("queue label not set: %v", updated.Labels)
+				// 	}
+				// }
 			}
 
 			if tt.wantEventSubstr != "" {

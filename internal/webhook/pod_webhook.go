@@ -40,6 +40,10 @@ func (w *PodMutatingWebhook) Handle(ctx context.Context, req admission.Request) 
 		return admission.Errored(http.StatusBadRequest, err)
 	}
 
+	if w.isKueueManaged(pod) {
+		return admission.Allowed("pod is Kueue-managed — WTO defers to Kueue")
+	}
+
 	profileName, ok := pod.Annotations[ProfileAnnotation]
 	if !ok {
 		return admission.Allowed("no profile annotation")
@@ -79,7 +83,9 @@ func (w *PodMutatingWebhook) Handle(ctx context.Context, req admission.Request) 
 
 	overrides := w.injectResources(pod, resolved)
 	w.injectDRAClaims(pod, profile.Name, resolved)
-	w.injectQueueLabel(pod, resolved)
+	// Queue label injection disabled — WTO defers queue placement to Kueue.
+	// See wto-kueue-boundary.md. Restore when webhook ordering is resolved.
+	// w.injectQueueLabel(pod, resolved)
 	w.addSchedulingGate(pod)
 	w.setCostLabels(pod, profile)
 	w.setTrackingAnnotations(pod, profile, overrides)
@@ -178,18 +184,34 @@ func (w *PodMutatingWebhook) injectDRAClaims(pod *corev1.Pod, profileName string
 	}
 }
 
-func (w *PodMutatingWebhook) injectQueueLabel(pod *corev1.Pod, spec *wtov1alpha1.WorkloadProfileSpec) {
-	if spec.Placement == nil || spec.Placement.Type != wtov1alpha1.PlacementTypeQueue || spec.Placement.Queue == nil {
-		return
+func (w *PodMutatingWebhook) isKueueManaged(pod *corev1.Pod) bool {
+	if pod.Labels != nil {
+		if _, ok := pod.Labels["kueue.x-k8s.io/queue-name"]; ok {
+			return true
+		}
 	}
-	if pod.Labels == nil {
-		pod.Labels = map[string]string{}
+	for _, gate := range pod.Spec.SchedulingGates {
+		if gate.Name == "kueue.x-k8s.io/admission" {
+			return true
+		}
 	}
-	pod.Labels["kueue.x-k8s.io/queue-name"] = spec.Placement.Queue.LocalQueueName
-	if spec.Placement.Queue.PriorityClass != nil {
-		pod.Labels["kueue.x-k8s.io/priority-class"] = *spec.Placement.Queue.PriorityClass
-	}
+	return false
 }
+
+// injectQueueLabel is disabled — WTO defers queue placement to Kueue.
+// See wto-kueue-boundary.md. Restore when webhook ordering is resolved.
+// func (w *PodMutatingWebhook) injectQueueLabel(pod *corev1.Pod, spec *wtov1alpha1.WorkloadProfileSpec) {
+// 	if spec.Placement == nil || spec.Placement.Type != wtov1alpha1.PlacementTypeQueue || spec.Placement.Queue == nil {
+// 		return
+// 	}
+// 	if pod.Labels == nil {
+// 		pod.Labels = map[string]string{}
+// 	}
+// 	pod.Labels["kueue.x-k8s.io/queue-name"] = spec.Placement.Queue.LocalQueueName
+// 	if spec.Placement.Queue.PriorityClass != nil {
+// 		pod.Labels["kueue.x-k8s.io/priority-class"] = *spec.Placement.Queue.PriorityClass
+// 	}
+// }
 
 func (w *PodMutatingWebhook) addSchedulingGate(pod *corev1.Pod) {
 	for _, gate := range pod.Spec.SchedulingGates {
@@ -207,15 +229,17 @@ func (w *PodMutatingWebhook) checkBlockingConflicts(pod *corev1.Pod, spec *wtov1
 		return "pod already has resourceClaims and profile has deviceClaims — dual device allocation risk. Remove existing resourceClaims or use a profile without deviceClaims."
 	}
 
-	if spec.Placement != nil && spec.Placement.Type == wtov1alpha1.PlacementTypeQueue {
-		if existing, ok := pod.Labels["kueue.x-k8s.io/queue-name"]; ok {
-			if spec.Placement.Queue != nil && existing != spec.Placement.Queue.LocalQueueName {
-				return fmt.Sprintf(
-					"pod has kueue.x-k8s.io/queue-name=%q but profile specifies queue %q — ambiguous queue assignment. Remove the label or use a matching profile.",
-					existing, spec.Placement.Queue.LocalQueueName)
-			}
-		}
-	}
+	// Queue conflict detection disabled — WTO defers queue placement to Kueue.
+	// See wto-kueue-boundary.md.
+	// if spec.Placement != nil && spec.Placement.Type == wtov1alpha1.PlacementTypeQueue {
+	// 	if existing, ok := pod.Labels["kueue.x-k8s.io/queue-name"]; ok {
+	// 		if spec.Placement.Queue != nil && existing != spec.Placement.Queue.LocalQueueName {
+	// 			return fmt.Sprintf(
+	// 				"pod has kueue.x-k8s.io/queue-name=%q but profile specifies queue %q — ambiguous queue assignment. Remove the label or use a matching profile.",
+	// 				existing, spec.Placement.Queue.LocalQueueName)
+	// 		}
+	// 	}
+	// }
 
 	if spec.Placement != nil && spec.Placement.Type == wtov1alpha1.PlacementTypeNode && spec.Placement.Node != nil {
 		for k, profileV := range spec.Placement.Node.NodeSelector {

@@ -88,7 +88,7 @@ func TestHandle(t *testing.T) {
 			wantMsg:   "dual device allocation",
 		},
 		{
-			name: "blocking conflict: conflicting queue label",
+			name: "Kueue-managed pod is skipped",
 			pod: tu.NewPod("test", "default").
 				WithProfileAnnotation("queued").
 				WithLabel("kueue.x-k8s.io/queue-name", "queue-a").
@@ -97,8 +97,8 @@ func TestHandle(t *testing.T) {
 				WithQueuePlacement("queue-b", nil).
 				Resolve().
 				Build(),
-			wantAllow: false,
-			wantMsg:   "ambiguous queue",
+			wantAllow: true,
+			wantMsg:   "Kueue-managed",
 		},
 		{
 			name: "blocking conflict: conflicting nodeSelector",
@@ -251,55 +251,37 @@ func TestAddSchedulingGate(t *testing.T) {
 	})
 }
 
-func TestInjectQueueLabel(t *testing.T) {
+// TestInjectQueueLabel disabled — queue injection commented out.
+// See wto-kueue-boundary.md. Restore when queue placement is re-enabled.
+
+func TestIsKueueManaged(t *testing.T) {
 	wh := &PodMutatingWebhook{}
-	prio := "high"
 
-	t.Run("queue label set", func(t *testing.T) {
-		pod := tu.NewPod("p", "ns").Build()
-		spec := &wtov1alpha1.WorkloadProfileSpec{}
-		spec.Placement = &wtov1alpha1.PlacementConfig{
-			Type:  wtov1alpha1.PlacementTypeQueue,
-			Queue: &wtov1alpha1.QueuePlacement{LocalQueueName: "my-queue"},
-		}
-		wh.injectQueueLabel(pod, spec)
-		if pod.Labels["kueue.x-k8s.io/queue-name"] != "my-queue" {
-			t.Errorf("queue label not set: %v", pod.Labels)
+	t.Run("pod with queue label is Kueue-managed", func(t *testing.T) {
+		pod := tu.NewPod("p", "ns").WithLabel("kueue.x-k8s.io/queue-name", "my-queue").Build()
+		if !wh.isKueueManaged(pod) {
+			t.Error("expected pod with queue label to be Kueue-managed")
 		}
 	})
 
-	t.Run("priority class set", func(t *testing.T) {
-		pod := tu.NewPod("p", "ns").Build()
-		spec := &wtov1alpha1.WorkloadProfileSpec{}
-		spec.Placement = &wtov1alpha1.PlacementConfig{
-			Type:  wtov1alpha1.PlacementTypeQueue,
-			Queue: &wtov1alpha1.QueuePlacement{LocalQueueName: "q", PriorityClass: &prio},
-		}
-		wh.injectQueueLabel(pod, spec)
-		if pod.Labels["kueue.x-k8s.io/priority-class"] != "high" {
-			t.Errorf("priority class label not set: %v", pod.Labels)
+	t.Run("pod with Kueue gate is Kueue-managed", func(t *testing.T) {
+		pod := tu.NewPod("p", "ns").WithSchedulingGate("kueue.x-k8s.io/admission").Build()
+		if !wh.isKueueManaged(pod) {
+			t.Error("expected pod with Kueue gate to be Kueue-managed")
 		}
 	})
 
-	t.Run("no-op for node placement", func(t *testing.T) {
+	t.Run("pod without Kueue markers is not managed", func(t *testing.T) {
 		pod := tu.NewPod("p", "ns").Build()
-		spec := &wtov1alpha1.WorkloadProfileSpec{}
-		spec.Placement = &wtov1alpha1.PlacementConfig{
-			Type: wtov1alpha1.PlacementTypeNode,
-			Node: &wtov1alpha1.NodePlacement{},
-		}
-		wh.injectQueueLabel(pod, spec)
-		if pod.Labels != nil {
-			t.Errorf("labels should be nil for node placement: %v", pod.Labels)
+		if wh.isKueueManaged(pod) {
+			t.Error("expected plain pod to not be Kueue-managed")
 		}
 	})
 
-	t.Run("no-op for nil placement", func(t *testing.T) {
-		pod := tu.NewPod("p", "ns").Build()
-		spec := &wtov1alpha1.WorkloadProfileSpec{}
-		wh.injectQueueLabel(pod, spec)
-		if pod.Labels != nil {
-			t.Errorf("labels should be nil: %v", pod.Labels)
+	t.Run("pod with WTO gate only is not Kueue-managed", func(t *testing.T) {
+		pod := tu.NewPod("p", "ns").WithWTOGate().Build()
+		if wh.isKueueManaged(pod) {
+			t.Error("expected pod with only WTO gate to not be Kueue-managed")
 		}
 	})
 }

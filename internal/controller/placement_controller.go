@@ -85,10 +85,12 @@ func (r *PlacementReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 			if placement.Node != nil {
 				r.applyNodePlacement(pod, placement.Node)
 			}
-		case wtov1alpha1.PlacementTypeQueue:
-			if placement.Queue != nil {
-				r.applyQueuePlacement(pod, placement.Queue)
-			}
+		// Queue placement disabled — WTO defers queue placement to Kueue.
+		// See wto-kueue-boundary.md.
+		// case wtov1alpha1.PlacementTypeQueue:
+		// 	if placement.Queue != nil {
+		// 		r.applyQueuePlacement(pod, placement.Queue)
+		// 	}
 		}
 	}
 
@@ -227,16 +229,18 @@ func (r *PlacementReconciler) applyNodePlacement(pod *corev1.Pod, node *wtov1alp
 	}
 }
 
-func (r *PlacementReconciler) applyQueuePlacement(pod *corev1.Pod, queue *wtov1alpha1.QueuePlacement) {
-	if pod.Labels == nil {
-		pod.Labels = map[string]string{}
-	}
-	pod.Labels["kueue.x-k8s.io/queue-name"] = queue.LocalQueueName
-
-	if queue.PriorityClass != nil {
-		pod.Labels["kueue.x-k8s.io/priority-class"] = *queue.PriorityClass
-	}
-}
+// applyQueuePlacement is disabled — WTO defers queue placement to Kueue.
+// See wto-kueue-boundary.md.
+// func (r *PlacementReconciler) applyQueuePlacement(pod *corev1.Pod, queue *wtov1alpha1.QueuePlacement) {
+// 	if pod.Labels == nil {
+// 		pod.Labels = map[string]string{}
+// 	}
+// 	pod.Labels["kueue.x-k8s.io/queue-name"] = queue.LocalQueueName
+//
+// 	if queue.PriorityClass != nil {
+// 		pod.Labels["kueue.x-k8s.io/priority-class"] = *queue.PriorityClass
+// 	}
+// }
 
 func (r *PlacementReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
